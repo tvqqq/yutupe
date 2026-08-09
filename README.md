@@ -1,33 +1,28 @@
-# YouTube Collections MVP
+# YouTube Collections
 
-Chrome/Edge extension để nhóm các channel YouTube và xem feed tập trung theo group. MVP hoạt động local-first, chèn UI trực tiếp vào YouTube và không cần API key.
+Chrome/Edge Manifest V3 extension để nhóm subscriptions và xem focused feed. Toàn bộ giao diện chạy trực tiếp trong `youtube.com`; extension không còn popup riêng.
 
-## MVP hiện có
+## Tính năng
 
-- Tạo, sửa, xóa group; chọn emoji, màu hoặc upload custom icon.
-- Một channel có thể nằm trong nhiều group.
-- Tự thu thập channel/video đang hiển thị trên YouTube Home, Subscriptions và các feed tương thích.
-- Feed tổng hoặc theo group ngay trong popup và panel chèn trên YouTube.
-- Tìm kiếm, lọc theo độ dài/content type/watched và sort theo ngày, độ dài, lượt xem.
-- Mark as watched, hide watched, hide video và Play all.
-- Quản lý channel, gắn custom tags và smart-tag cục bộ.
-- Thêm entry “YouTube Collections” vào left sidebar của YouTube.
-- Notifications local cho group khi YouTube đang mở và phát hiện video mới.
-- Import/export JSON, reset dữ liệu và light/dark mode.
-- Một codebase build Manifest V3 cho Chrome và Edge.
-
-Các tính năng cần hạ tầng hoặc quyền tài khoản đã được tách khỏi MVP và ghi cụ thể trong [docs/HANDOVER.md](docs/HANDOVER.md): YouTube OAuth/API, unsubscribe thật, AI cloud, Google Drive sync, WebSub notification, dead-channel verification và mobile/Firefox sync.
+- Workspace full-page dưới YouTube header, mở từ left sidebar, nút nổi hoặc toolbar icon.
+- Groups, custom icon, many-to-many channel assignment và notifications per group.
+- Feed theo group với search, duration/content type/watched filters và sorting.
+- Local DOM discovery khi chưa đăng nhập API.
+- Google OAuth, import toàn bộ subscriptions và canonical channel metadata.
+- Feed thật từ uploads playlists, bổ sung duration/statistics từ YouTube Data API.
+- Bulk unsubscribe thật có danh sách preview và xác nhận.
+- Google Drive `appDataFolder` push/pull groups, channels và watched state.
+- AI tags và WebSub event inbox qua configurable Cloud API.
+- Import/export JSON và local notifications.
 
 ## Chạy local
-
-Yêu cầu Node.js 20+ và pnpm.
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-Build production:
+Build và kiểm tra:
 
 ```bash
 pnpm typecheck
@@ -36,48 +31,42 @@ pnpm build
 pnpm build:edge
 ```
 
-Output:
+Load `.output/chrome-mv3` tại `chrome://extensions` hoặc `.output/edge-mv3` tại `edge://extensions`.
 
-- Chrome: `.output/chrome-mv3`
-- Edge: `.output/edge-mv3`
+## Google OAuth production setup
 
-Load unpacked trên Chrome:
+OAuth thật cần stable extension ID. Xem chi tiết trong [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md).
 
-1. Mở `chrome://extensions`.
-2. Bật Developer mode.
-3. Chọn **Load unpacked** và trỏ tới `.output/chrome-mv3`.
-4. Mở hoặc reload `https://www.youtube.com`.
+```bash
+WXT_GOOGLE_CLIENT_ID_CHROME="...apps.googleusercontent.com" \
+WXT_EXTENSION_KEY_CHROME="public-extension-key" \
+pnpm build
+```
 
-Trên Edge dùng `edge://extensions` và thư mục `.output/edge-mv3`.
+Chrome/Edge nên có OAuth client riêng. Nếu build chưa chứa manifest `oauth2`, Settings vẫn cung cấp PKCE fallback cho development, nhưng production phải dùng Chrome Extension OAuth client.
 
 ## Cách dùng
 
-1. Mở YouTube Home hoặc Subscriptions và cuộn trang để extension thu thập video/channel đang hiển thị.
-2. Mở popup extension → **Groups** → tạo group.
-3. Sang **Channels** và bấm các group để gán channel.
-4. Xem feed theo group trong popup hoặc bấm nút nổi/entry sidebar trên YouTube.
-5. Vào **Cài đặt** để bật hide-watched, notification local hoặc export backup.
-
-## Scripts
-
-| Script | Mục đích |
-|---|---|
-| `pnpm dev` | Chạy WXT development với Chrome |
-| `pnpm dev:edge` | Chạy development với Edge |
-| `pnpm typecheck` | TypeScript strict check |
-| `pnpm test` | Unit tests bằng Vitest |
-| `pnpm build` | Build Chrome MV3 |
-| `pnpm build:edge` | Build Edge MV3 |
-| `pnpm zip` | Tạo Chrome submission ZIP |
-| `pnpm zip:edge` | Tạo Edge submission ZIP |
+1. Mở `youtube.com` và bấm **YouTube Collections** ở sidebar hoặc toolbar.
+2. Vào **Cài đặt → Google & Cloud integrations**.
+3. Kết nối Google rồi chạy **Sync subscriptions** và **Refresh feed**.
+4. Tạo group trong tab Groups và gán channel trong tab Channels.
+5. Chọn nhiều channel → **Unsubscribe** để xem preview và xác nhận trước khi gọi API thật.
+6. Dùng Push/Pull Drive để backup hoặc restore.
 
 ## Tài liệu
 
 - [Kiến trúc](docs/ARCHITECTURE.md)
-- [Developer handover và backlog](docs/HANDOVER.md)
-- [Testing và release checklist](docs/TESTING.md)
+- [Google OAuth/API setup](docs/GOOGLE_SETUP.md)
+- [Cloud API contract](docs/CLOUD_API.md)
+- [Developer handover](docs/HANDOVER.md)
+- [Testing checklist](docs/TESTING.md)
 - [Privacy baseline](docs/PRIVACY.md)
 
-## Lưu ý
+## Giới hạn hiện tại
 
-MVP đọc metadata từ DOM đang hiển thị, không đọc toàn bộ subscription account. Selector YouTube có thể thay đổi; toàn bộ logic parsing được tập trung trong `src/youtube/parser.ts` để dễ bảo trì.
+- Không có credential Google/backend trong repo; integration chỉ chạy sau khi developer cấu hình project tương ứng.
+- Drive pull dùng cloud-wins snapshot, chưa có per-entity tombstone conflict resolution.
+- WebSub callback và AI inference phải được triển khai ở backend theo contract.
+- OAuth access token chỉ giữ trong `storage.session`; người dùng kết nối lại sau khi restart browser.
+- Dead-channel classification và Deck view chưa hoàn thiện.

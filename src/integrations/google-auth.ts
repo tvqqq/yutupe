@@ -10,6 +10,7 @@ const SCOPES = [
 
 interface TokenSession {
   accessToken: string;
+  idToken?: string;
   expiresAt: number;
   email?: string;
 }
@@ -46,7 +47,24 @@ export async function requireAccessToken(): Promise<string> {
   return session.accessToken;
 }
 
+export async function requireIdentityToken(): Promise<string> {
+  const session = await readSession();
+  if (!session || session.expiresAt <= Date.now() + 30_000) throw new Error('Phiên Cloud identity đã hết hạn. Hãy kết nối lại Google.');
+  return session.idToken ?? session.accessToken;
+}
+
 export async function connectGoogle(clientId: string): Promise<AuthStatus> {
+  const manifestClientId = browser.runtime.getManifest().oauth2?.client_id;
+  if (manifestClientId) {
+    const result = await browser.identity.getAuthToken({ interactive: true, scopes: SCOPES });
+    const accessToken = typeof result === 'string' ? result : result?.token;
+    if (!accessToken) throw new Error('Chrome Identity không trả về access token.');
+    const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${accessToken}` } });
+    const profile = profileResponse.ok ? await profileResponse.json() as { email?: string } : {};
+    const session: TokenSession = { accessToken, expiresAt: Date.now() + 55 * 60_000, email: profile.email };
+    await browser.storage.session.set({ [SESSION_KEY]: session });
+    return { connected: true, email: session.email, expiresAt: session.expiresAt };
+  }
   if (!clientId.trim()) throw new Error('Hãy cấu hình Google OAuth Client ID trước.');
   const verifierBytes = crypto.getRandomValues(new Uint8Array(64));
   const verifier = base64Url(verifierBytes);
@@ -85,13 +103,14 @@ export async function connectGoogle(clientId: string): Promise<AuthStatus> {
     })
   });
   if (!tokenResponse.ok) throw new Error(`Đổi OAuth token thất bại (${tokenResponse.status}).`);
-  const token = await tokenResponse.json() as { access_token: string; expires_in: number };
+  const token = await tokenResponse.json() as { access_token: string; expires_in: number; id_token?: string };
   const profileResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
     headers: { Authorization: `Bearer ${token.access_token}` }
   });
   const profile = profileResponse.ok ? await profileResponse.json() as { email?: string } : {};
   const session: TokenSession = {
     accessToken: token.access_token,
+    idToken: token.id_token,
     expiresAt: Date.now() + token.expires_in * 1_000,
     email: profile.email
   };
@@ -105,6 +124,9 @@ export async function disconnectGoogle(): Promise<void> {
     await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(session.accessToken)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     }).catch(() => undefined);
+  }
+  if (session?.accessToken && browser.runtime.getManifest().oauth2?.client_id) {
+    await browser.identity.removeCachedAuthToken({ token: session.accessToken }).catch(() => undefined);
   }
   await browser.storage.session.remove(SESSION_KEY);
 }

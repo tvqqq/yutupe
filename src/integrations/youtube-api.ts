@@ -2,11 +2,17 @@ import type { Channel, Video } from '@/src/domain/types';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 
+class YouTubeApiError extends Error {
+  constructor(public readonly status: number, detail: string) {
+    super(`YouTube API ${status}: ${detail.slice(0, 300)}`);
+  }
+}
+
 async function apiJson<T>(url: string, accessToken: string): Promise<T> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`YouTube API ${response.status}: ${detail.slice(0, 300)}`);
+    throw new YouTubeApiError(response.status, detail);
   }
   return response.json() as Promise<T>;
 }
@@ -85,15 +91,28 @@ export async function fetchSubscriptions(accessToken: string): Promise<Channel[]
   });
 }
 
-export async function fetchUploadFeed(accessToken: string, channels: Channel[], perChannel = 5): Promise<Video[]> {
+export interface UploadFeedResult {
+  videos: Video[];
+  skippedChannels: Array<{ channelId: string; channelTitle: string; playlistId: string; reason: string }>;
+}
+
+export async function fetchUploadFeed(accessToken: string, channels: Channel[], perChannel = 5): Promise<UploadFeedResult> {
   const snippets: Array<{ id: string; title: string; channelId: string; channelTitle: string; publishedAt: string; thumbnailUrl?: string }> = [];
+  const skippedChannels: UploadFeedResult['skippedChannels'] = [];
   for (const channel of channels) {
     if (!channel.uploadsPlaylistId) continue;
     const params = new URLSearchParams({ part: 'snippet,contentDetails', playlistId: channel.uploadsPlaylistId, maxResults: String(perChannel) });
-    const page = await apiJson<{ items?: Array<{
-      contentDetails?: { videoId?: string };
-      snippet: { title: string; channelId?: string; channelTitle: string; publishedAt: string; thumbnails?: Record<string, { url: string }>; resourceId?: { videoId?: string } };
-    }> }>(`${API}/playlistItems?${params}`, accessToken);
+    let page: { items?: Array<{
+        contentDetails?: { videoId?: string };
+        snippet: { title: string; channelId?: string; channelTitle: string; publishedAt: string; thumbnails?: Record<string, { url: string }>; resourceId?: { videoId?: string } };
+      }> };
+    try {
+      page = await apiJson(`${API}/playlistItems?${params}`, accessToken);
+    } catch (error) {
+      if (!(error instanceof YouTubeApiError) || error.status !== 404) throw error;
+      skippedChannels.push({ channelId: channel.id, channelTitle: channel.title, playlistId: channel.uploadsPlaylistId, reason: error.message });
+      continue;
+    }
     for (const item of page.items ?? []) {
       const id = item.contentDetails?.videoId ?? item.snippet.resourceId?.videoId;
       if (!id || item.snippet.title === 'Deleted video' || item.snippet.title === 'Private video') continue;
@@ -107,11 +126,12 @@ export async function fetchUploadFeed(accessToken: string, channels: Channel[], 
     const page = await apiJson<{ items?: Array<{ id: string; contentDetails?: { duration?: string }; statistics?: { viewCount?: string }; snippet?: { liveBroadcastContent?: string } }> }>(`${API}/videos?${params}`, accessToken);
     for (const item of page.items ?? []) details.set(item.id, { durationSeconds: parseIsoDuration(item.contentDetails?.duration), viewCount: item.statistics?.viewCount ? Number(item.statistics.viewCount) : undefined, live: item.snippet?.liveBroadcastContent });
   }
-  return snippets.map((item) => {
+  const videos = snippets.map((item) => {
     const detail = details.get(item.id);
     const contentType = detail?.live === 'live' ? 'live' : detail?.live === 'upcoming' ? 'upcoming' : (detail?.durationSeconds ?? 999) <= 60 ? 'short' : 'video';
     return { ...item, url: `https://www.youtube.com/watch?v=${item.id}`, durationSeconds: detail?.durationSeconds, viewCount: detail?.viewCount, contentType, discoveredAt: new Date().toISOString() } satisfies Video;
   });
+  return { videos, skippedChannels };
 }
 
 export async function unsubscribe(accessToken: string, subscriptionId: string): Promise<void> {

@@ -60,6 +60,13 @@ select, .field { min-height: 38px; border: 1px solid var(--line); background: va
 .type-pill.selected { color: var(--text); background: var(--surface-2); border-color: var(--brand); }
 .feed-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); margin: 14px 0 9px; font-size: 12px; }
 .feed-heading strong { color: var(--text); }
+.feed-actions { display: flex; align-items: center; gap: 8px; }
+.feed-sections { display: grid; gap: 28px; }
+.feed-section { display: grid; gap: 12px; }
+.feed-section > header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.feed-section > header h2 { margin: 0 0 3px; color: var(--text); font-size: 18px; }
+.feed-section > header p { margin: 0; color: var(--muted); font-size: 13px; }
+.feed-section > header > span { min-width: 30px; padding: 5px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); font-size: 12px; font-weight: 750; text-align: center; }
 .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .video-grid.compact { grid-template-columns: 1fr; }
 .video-card { min-width: 0; overflow: hidden; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); transition: transform .15s ease, border-color .15s ease; }
@@ -86,3 +93,18 @@ select, .field { min-height: 38px; border: 1px solid var(--line); background: va
   .filter-row { grid-template-columns: 1fr 1fr; }
   .search { grid-column: 1 / -1; }
 }
+
+/* Readable defaults for the full-page YouTube workspace. */
+.ytc-root { font-size: 15px; }
+.ytc-root .primary, .ytc-root .secondary, .ytc-root .ghost, .ytc-root .danger-button { min-height: 40px; font-size: 14px; }
+.ytc-root .small { min-height: 34px; font-size: 13px; }
+.ytc-root .chip { height: 38px; padding-inline: 12px; font-size: 14px; }
+.chip-count { min-width: 21px; padding: 2px 6px; border-radius: 99px; background: var(--surface-3); color: var(--text); font-size: 11px; text-align: center; }
+.chip.active .chip-count { background: color-mix(in srgb, var(--bg) 18%, transparent); color: var(--bg); }
+.ytc-root .type-pill { padding: 7px 11px; font-size: 13px; }
+.ytc-root .feed-heading { margin: 18px 0 12px; font-size: 14px; }
+.ytc-root .video-title { min-height: 42px; font-size: 15px; line-height: 1.4; }
+.ytc-root .channel-title, .ytc-root .video-meta { font-size: 13px; }
+.ytc-root .card-actions button { min-height: 34px; padding-inline: 10px; font-size: 13px; }
+.ytc-root .empty strong { font-size: 17px; }
+.ytc-root .empty span { max-width: 440px; font-size: 14px; }

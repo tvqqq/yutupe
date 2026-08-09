@@ -22,6 +22,7 @@ export type AppMessage =
   | { type: 'AI_TAG_CHANNEL'; payload: { channelId: string } }
   | { type: 'REGISTER_WEBSUB' }
   | { type: 'POLL_CLOUD_EVENTS' }
+  | { type: 'GRANT_CLOUD_PERMISSION'; payload: { baseUrl: string } }
   | { type: 'IMPORT_STATE'; payload: unknown }
   | { type: 'RESET_STATE' }
   | { type: 'OPEN_PANEL' }

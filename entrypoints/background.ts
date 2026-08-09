@@ -1,7 +1,7 @@
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
 import { createInitialState, makeId, MAX_CACHED_VIDEOS, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, nowIso, STORAGE_KEY, upsertById } from '@/src/domain/state';
 import type { AppState, Channel, Group, Video } from '@/src/domain/types';
-import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken } from '@/src/integrations/google-auth';
+import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, requireIdentityToken } from '@/src/integrations/google-auth';
 import { fetchSubscriptions, fetchUploadFeed, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
 import { pollCloudEvents, registerWebSub, suggestAiTags } from '@/src/integrations/cloud-api';
@@ -41,7 +41,8 @@ function canonicalizeChannels(state: AppState, apiChannels: Channel[]): AppState
   const aliases = new Map<string, string>();
   const oldByPath = new Map(state.channels.map((channel) => [channelPath(channel.url), channel]).filter((entry): entry is [string, Channel] => Boolean(entry[0])));
   const enriched = apiChannels.map((channel) => {
-    const old = oldByPath.get(channelPath(channel.url));
+    const path = channelPath(channel.url);
+    const old = path ? oldByPath.get(path) : undefined;
     if (old && old.id !== channel.id) aliases.set(old.id, channel.id);
     const exact = state.channels.find((item) => item.id === channel.id);
     return { ...channel, tags: exact?.tags ?? old?.tags ?? channel.tags };
@@ -60,6 +61,14 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
   try {
     if (message.type === 'OPEN_PANEL') {
       return { ok: true };
+    }
+
+    if (message.type === 'GRANT_CLOUD_PERMISSION') {
+      if (!message.payload.baseUrl) throw new Error('Hãy nhập Cloud API Base URL trước.');
+      const origin = new URL(message.payload.baseUrl).origin;
+      if (!origin.startsWith('https://')) throw new Error('Cloud API phải dùng HTTPS.');
+      const granted = await browser.permissions.request({ origins: [`${origin}/*`] });
+      return { ok: true, data: { granted } };
     }
 
     let state = await readState();
@@ -87,10 +96,18 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const groupIds = message.payload.groupId ? new Set(state.groups.find((group) => group.id === message.payload.groupId)?.channelIds ?? []) : null;
       const channels = state.channels
         .filter((channel) => channel.uploadsPlaylistId && (!groupIds || groupIds.has(channel.id)))
-        .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt))
-        .slice(0, state.settings.youtubeSyncChannelLimit);
-      const videos = await fetchUploadFeed(accessToken, channels);
+        .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
+      // A selected group is an explicit request: fetch every channel in that group.
+      // The configurable limit only protects the broad "All subscriptions" refresh.
+      const feedChannels = groupIds ? channels : channels.slice(0, state.settings.youtubeSyncChannelLimit);
+      const { videos, skippedChannels } = await fetchUploadFeed(accessToken, feedChannels);
+      const skippedIds = new Set(skippedChannels.map((item) => item.channelId));
+      if (skippedIds.size) {
+        state = { ...state, channels: state.channels.map((channel) => skippedIds.has(channel.id) ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined } : channel) };
+      }
       state = { ...state, videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS), settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { videoCount: videos.length, skippedChannels } };
     }
 
     if (message.type === 'UNSUBSCRIBE_CHANNELS') {
@@ -126,7 +143,7 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
     if (message.type === 'AI_TAG_CHANNEL') {
       const channel = state.channels.find((item) => item.id === message.payload.channelId);
       if (!channel) throw new Error('Không tìm thấy channel.');
-      const suggestion = await suggestAiTags(state.settings.cloudApiBaseUrl, await requireAccessToken(), channel);
+      const suggestion = await suggestAiTags(state.settings.cloudApiBaseUrl, await requireIdentityToken(), channel);
       state = { ...state, channels: state.channels.map((item) => item.id === channel.id ? { ...item, tags: [...new Set([...item.tags, ...suggestion.tags])] } : item) };
       const saved = await writeState(state);
       return { ok: true, state: saved, data: suggestion };
@@ -134,12 +151,12 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
 
     if (message.type === 'REGISTER_WEBSUB') {
       const channelIds = state.channels.filter((channel) => channel.id.startsWith('UC')).map((channel) => channel.id);
-      const result = await registerWebSub(state.settings.cloudApiBaseUrl, await requireAccessToken(), channelIds);
+      const result = await registerWebSub(state.settings.cloudApiBaseUrl, await requireIdentityToken(), channelIds);
       return { ok: true, state, data: result };
     }
 
     if (message.type === 'POLL_CLOUD_EVENTS') {
-      const result = await pollCloudEvents(state.settings.cloudApiBaseUrl, await requireAccessToken(), state.settings.cloudEventCursor);
+      const result = await pollCloudEvents(state.settings.cloudApiBaseUrl, await requireIdentityToken(), state.settings.cloudEventCursor);
       const fresh = result.events.map((event) => event.video).filter((video) => !state.videos.some((item) => item.id === video.id));
       state = {
         ...state,

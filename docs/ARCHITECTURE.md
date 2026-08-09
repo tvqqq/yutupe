@@ -1,105 +1,85 @@
 # Architecture
 
-## Runtime surfaces
-
 ```mermaid
 flowchart LR
   Y[YouTube page] --> C[Content script]
-  C --> S[Shadow DOM panel]
-  P[Popup dashboard] --> B[MV3 background worker]
-  S --> B
+  C --> W[Shadow DOM full workspace]
+  W --> B[MV3 background worker]
   C --> B
-  B --> L[chrome.storage.local]
+  B --> L[storage.local app state]
+  B --> S[storage.session tokens]
+  B --> G[Google OAuth / YouTube / Drive]
+  B --> API[Optional AI and WebSub API]
   B --> N[Browser notifications]
 ```
 
+## Runtime boundaries
+
+### Content script and workspace
+
+`entrypoints/youtube.content.tsx` mount một Shadow DOM workspace trực tiếp dưới YouTube header, thêm left-navigation entry, scan metadata DOM và đánh dấu video click là watched.
+
+Không có popup entrypoint. Toolbar action gửi `TOGGLE_PANEL` vào tab YouTube đang active.
+
+YouTube selectors chỉ nằm trong `src/youtube/parser.ts`.
+
 ### Background worker
 
-`entrypoints/background.ts` là nơi duy nhất mutate `AppState`. Popup và content script gửi typed message từ `src/domain/messages.ts`. Cách này tránh race condition khi hai UI cùng mở.
+`entrypoints/background.ts` là nơi duy nhất mutate `AppState`. Typed messages nằm trong `src/domain/messages.ts`; mutation queue tránh action đồng thời ghi đè nhau.
 
-Background worker thực hiện:
+Background xử lý:
 
-- CRUD groups, group-channel assignments và channel tags.
-- Merge các channel/video mới phát hiện.
-- Watched/hidden state.
-- Import/export state validation.
-- Notification local và xử lý click notification.
+- Groups, channel assignments, tags và watched/hidden state.
+- DOM discovery merge và canonical channel migration.
+- OAuth session, YouTube API, Drive sync và cloud adapters.
+- Bulk unsubscribe tuần tự.
+- Cloud event polling và notifications.
 
-### Content script
+OAuth tokens không bao giờ được gửi vào YouTube page context.
 
-`entrypoints/youtube.content.tsx`:
+## Data sources
 
-- Mount React panel bằng WXT Shadow Root UI.
-- Thêm entry vào YouTube left navigation.
-- Theo dõi DOM bằng `MutationObserver` có debounce.
-- Gọi `scanYouTubePage()` và gửi payload về background.
-- Đánh dấu watched khi người dùng bấm video YouTube đã được cache.
+- DOM adapter: fallback/local discovery.
+- YouTube API: subscriptions, canonical channels, uploads playlists và video details.
+- Drive `appDataFolder`: groups/channels/videoStates snapshot.
+- Cloud API: AI tags, WebSub registration và event inbox.
 
-Không đặt selector YouTube ở component React. Selector và metadata heuristics phải nằm trong `src/youtube/parser.ts`.
+`Channel.id` từ DOM bắt đầu bằng `channel:`. Subscription sync chuyển sang canonical `UC...` ID khi exact custom URL/handle match, đồng thời rewrite group/video references.
 
-### Popup
-
-Popup có bốn tab:
-
-- Feed: dùng chung `FeedView` với YouTube panel.
-- Groups: CRUD, icon, màu, notifications.
-- Channels: many-to-many groups, tags, local cleanup.
-- Settings: theme, hide watched, notifications, import/export/reset.
-
-## State model
-
-Toàn bộ state MVP được lưu tại key `youtube-collections-state-v1` trong `chrome.storage.local`.
+## State
 
 ```text
 AppState
 ├── groups[]
 │   └── channelIds[]
 ├── channels[]
-├── videos[]              capped at 2,000
+│   ├── subscriptionId
+│   └── uploadsPlaylistId
+├── videos[] (max 2,000)
 ├── videoStates[videoId]
 └── settings
 ```
 
-Group-channel hiện lưu dưới dạng `Group.channelIds`. Khi chuyển sang cloud sync, nên migrate thành entity `GroupChannel` độc lập để conflict resolution theo từng assignment.
+Google/Cloud tokens nằm ở `storage.session` riêng và không thuộc `AppState`, JSON export hoặc Drive snapshot.
 
-`Channel.id` trong local MVP được tạo từ pathname channel/handle. Khi có YouTube API, cần migrate sang canonical YouTube channel ID (`UC...`) và giữ alias map để không mất group assignment cũ.
+Drive pull hiện dùng cloud-wins cho groups/channels/watched preferences. Trước auto-sync cần chuyển assignment thành entity riêng có `updatedAt`, `deletedAt`, `deviceId`.
 
 ## Feed pipeline
 
-`selectFeed()` trong `src/domain/state.ts` là pure function:
-
-1. Giới hạn theo group.
-2. Loại video hidden.
-3. Áp content type, duration và watched filter.
-4. Áp tìm kiếm title/channel.
-5. Sort.
-
-Hàm được dùng bởi cả popup và content panel, đồng thời có unit tests.
-
-## Design system
-
-`src/ui/design-system.css` chứa semantic token và component primitives lấy cảm hứng từ TanStack Design System:
-
-- Neutral surfaces, subtle borders, rounded cards.
-- Cyan/violet accent.
-- Light/dark semantic variables.
-- Compact badges, inputs, pills và data-dense layouts.
-
-Không sử dụng logo hoặc trademark TanStack. Các component thuộc codebase này, không phụ thuộc runtime vào website TanStack.
+`selectFeed()` là pure function áp group, hidden, content type, duration, watched, search và sorting. API metadata có `publishedAt`; DOM-only metadata dùng `discoveredAt` fallback.
 
 ## Permissions
 
-- `storage`: local state.
-- `notifications`: notification cho group.
-- Host `https://www.youtube.com/*`: content script.
+- `storage`: local/session state.
+- `identity`: Google OAuth.
+- `activeTab`: toggle workspace từ toolbar.
+- `alarms`: cloud event polling.
+- `notifications`: group notifications.
+- YouTube/Google host permissions: API calls từ background.
+- Optional HTTPS host permission: chỉ Cloud API origin người dùng nhập và approve.
 
-Không dùng `tabs`, `webRequest`, quyền đọc toàn bộ website hay remote code.
+Không dùng `webRequest`, eval hoặc remote code.
 
-## Migration strategy
+## Design system
 
-`schemaVersion` hiện là `1`. Mọi thay đổi breaking phải:
-
-1. Thêm migration pure function `vN -> vN+1`.
-2. Chạy migration trong background trước khi trả `GET_STATE`.
-3. Giữ fixture backup của phiên bản cũ trong test.
-4. Không mutate trực tiếp file import trước khi validate.
+Semantic tokens và component primitives nằm trong `src/ui/design-system.css`, theo visual language của TanStack Design System nhưng không dùng logo/trademark TanStack.

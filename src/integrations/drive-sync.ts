@@ -1,4 +1,4 @@
-import type { AppState, Channel, Group, Settings, VideoState } from '@/src/domain/types';
+import type { AppState, Channel, Group, Settings, VideoState } from '../domain/types';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';

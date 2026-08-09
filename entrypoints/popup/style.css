@@ -1,4 +1,3 @@
-html, body, #root { width: 780px; min-width: 780px; height: 600px; min-height: 600px; overflow: hidden; }
 .dashboard { height: 100%; display: grid; grid-template-rows: 72px 1fr; background: var(--bg); color: var(--text); }
 .app-header { display: flex; align-items: center; justify-content: space-between; padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 10px; }.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: #061519; background: linear-gradient(135deg, var(--brand), #a78bfa); }.brand div { display: grid; gap: 2px; }.brand strong { font-size: 13px; }.brand small { color: var(--muted); font-size: 10px; }
@@ -9,3 +8,24 @@ html, body, #root { width: 780px; min-width: 780px; height: 600px; min-height: 6
 .channel-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 10px; }.channel-list { display: grid; gap: 7px; }.channel-row { display: grid; grid-template-columns: 180px minmax(180px, 1fr) 190px 34px; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; }.channel-identity { min-width: 0; display: flex; gap: 9px; align-items: center; }.channel-identity > img, .channel-identity > span { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; background: var(--surface-3); }.channel-identity div { display: grid; min-width: 0; }.channel-identity a { color: var(--text); font-size: 11px; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.channel-identity small { color: var(--muted); font-size: 9px; }.channel-groups { display: flex; flex-wrap: wrap; gap: 4px; }.channel-groups button { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: 7px; background: transparent; font-size: 9px; cursor: pointer; opacity: .65; }.channel-groups button.selected { opacity: 1; border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, transparent); }.tag-editor { display: flex; gap: 5px; }.tag-editor .field { min-width: 0; width: 100%; height: 32px; min-height: 32px; font-size: 9px; }.spark-button { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); display: flex; align-items: center; gap: 4px; padding: 0 7px; font-size: 9px; cursor: pointer; }.muted { color: var(--muted); font-size: 9px; }.status-badge { padding: 5px 9px; border-radius: 99px; color: var(--brand); background: color-mix(in srgb, var(--brand) 10%, transparent); font-size: 10px; font-weight: 700; }
 .settings-page { display: grid; gap: 9px; }.settings-page > .section-title { margin-bottom: 4px; }.settings-card { padding: 13px 15px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }.settings-card > div:first-child { display: grid; gap: 4px; }.settings-card strong { font-size: 12px; }.settings-card span { color: var(--muted); font-size: 10px; }.backup-card > div:last-child { display: flex; gap: 7px; }.danger-zone { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }.mvp-note { display: flex; gap: 11px; padding: 14px; color: var(--brand); background: color-mix(in srgb, var(--brand) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--line)); border-radius: 12px; }.mvp-note div { color: var(--text); }.mvp-note strong { font-size: 11px; }.mvp-note p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .boot { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: var(--muted); }.boot strong { color: var(--text); }.spin { animation: spin 1s linear infinite; }@keyframes spin { to { transform: rotate(360deg); } }
+.channel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.channel-row { grid-template-columns: 18px 180px minmax(180px, 1fr) 220px 34px; }
+.integration-section { margin-top: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.integration-section .section-title { margin-bottom: 10px; }.integration-section h2 { font-size: 15px; }
+.integration-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.integration-notice { margin: 10px 0 0; padding: 9px 11px; border-radius: 9px; background: var(--surface-2); color: var(--text); font-size: 11px; }
+.integration-meta { margin: 10px 0 0; color: var(--muted); font-size: 9px; }.status-badge.connected { color: #16a34a; background: rgba(34,197,94,.12); }
+
+/* Typography scale for the embedded workspace. */
+.dashboard { grid-template-rows: 76px 1fr; font-size: 15px; }
+.brand strong { font-size: 15px; }.brand small { font-size: 12px; }
+.app-header nav button { height: 42px; padding-inline: 12px; font-size: 14px; }.app-header nav span { min-width: 20px; font-size: 11px; }
+.app-main { padding: 22px; }.page { max-width: 1200px; }
+.section-title h1, .section-title h2 { font-size: 23px; }.section-title p { font-size: 14px; }
+.form-label { font-size: 14px; }
+.group-card-body span, .switch-row { font-size: 13px; }
+.channel-identity a { font-size: 14px; }.channel-identity small { font-size: 12px; }
+.channel-groups button { min-height: 30px; padding-inline: 8px; font-size: 12px; }
+.tag-editor .field { height: 36px; min-height: 36px; font-size: 12px; }.spark-button, .muted { font-size: 12px; }
+.status-badge { font-size: 12px; }.settings-card strong { font-size: 15px; }.settings-card span { font-size: 13px; }
+.mvp-note strong { font-size: 14px; }.mvp-note p, .integration-notice { font-size: 13px; }.integration-meta { font-size: 12px; }
