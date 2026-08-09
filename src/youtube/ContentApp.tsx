@@ -1,4 +1,3 @@
-import { ChevronDown, FolderKanban } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import Dashboard from '@/entrypoints/popup/App';
 import { EXTENSION_ROUTE_HASH } from '@/src/config';
@@ -54,9 +53,10 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
     if (openedByExtension.current) { openedByExtension.current = false; history.back(); }
     else { history.replaceState(history.state, '', '/'); setOpen(false); window.dispatchEvent(new Event('youtube-collections:route-change')); }
   };
+  if (!open) return null;
+
   const dark = document.documentElement.hasAttribute('dark');
-  return <div className={`ytc-root${open ? ' is-open is-page' : ''}`} style={{ '--ytc-top': `${layout.top}px`, '--ytc-left': `${layout.left}px` } as React.CSSProperties} data-theme={dark ? 'dark' : 'light'}>
-    <button className="ytc-launcher" onClick={() => window.dispatchEvent(new CustomEvent(openEvent))} title="YouTube Collections"><FolderKanban size={21} /><ChevronDown size={13} /></button>
-    {open && <section className="ytc-workspace" aria-label="YouTube Collections page"><Dashboard embedded onClose={closePage} /></section>}
+  return <div className="ytc-root is-open is-page" style={{ '--ytc-top': `${layout.top}px`, '--ytc-left': `${layout.left}px` } as React.CSSProperties} data-theme={dark ? 'dark' : 'light'}>
+    <section className="ytc-workspace" aria-label="YouTube Collections page"><Dashboard embedded onClose={closePage} /></section>
   </div>;
 }
