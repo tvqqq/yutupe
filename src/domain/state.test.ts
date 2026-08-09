@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, selectFeed, upsertById } from './state';
+import { createInitialState, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, retainOnlyChannelIds, selectFeed, upsertById } from './state';
 import type { AppState, FeedFilter, Video } from './types';
 
 const videos: Video[] = [
@@ -48,5 +48,13 @@ describe('state helpers', () => {
     const rescannedChannel = { ...currentChannel, lastSeenAt: 'new', tags: [] };
     expect(mergeDiscoveredChannels([currentChannel], [rescannedChannel])[0]?.tags).toEqual(['custom']);
     expect(mergeDiscoveredVideos([videos[0]!], [{ ...videos[0]!, discoveredAt: '2026-02-01T00:00:00Z' }])[0]?.discoveredAt).toBe('2026-01-02T00:00:00Z');
+  });
+
+  it('removes non-subscription channels, videos and group assignments', () => {
+    const current = { ...state(), channels: [{ id: 'c1', title: 'Subscribed', url: '', lastSeenAt: '', status: 'active' as const, tags: [] }, { id: 'mock', title: 'Recommendation', url: '', lastSeenAt: '', status: 'active' as const, tags: [] }], videos: [...videos, { ...videos[0]!, id: 'mock-video', channelId: 'mock' }], groups: [{ ...state().groups[0]!, channelIds: ['c1', 'mock'] }] };
+    const result = retainOnlyChannelIds(current, ['c1']);
+    expect(result.channels.map((item) => item.id)).toEqual(['c1']);
+    expect(result.videos.some((item) => item.channelId === 'mock')).toBe(false);
+    expect(result.groups[0]?.channelIds).toEqual(['c1']);
   });
 });

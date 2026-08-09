@@ -1,6 +1,7 @@
 import { Check, Clock3, Eye, EyeOff, Play, RefreshCw, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { selectFeed } from '@/src/domain/state';
+import { groupFeedSections } from '@/src/domain/feed-sections';
 import type { AppState, ContentType, FeedFilter, Group, Video } from '@/src/domain/types';
 import type { AppMessage } from '@/src/domain/messages';
 
@@ -67,7 +68,14 @@ function formatDuration(seconds?: number): string | null {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}` : `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
-function VideoCard({ video, watched, onAction }: { video: Video; watched: boolean; onAction: (message: AppMessage) => void }) {
+function formatPublishedAt(video: Video): string {
+  const value = video.publishedAt ?? video.discoveredAt;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return video.publishedLabel ?? 'Không rõ ngày đăng';
+  return new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+export function VideoCard({ video, watched, onAction }: { video: Video; watched: boolean; onAction: (message: AppMessage) => void }) {
   return <article className={watched ? 'video-card watched' : 'video-card'}>
     <a href={video.url} target="_blank" rel="noreferrer" className="thumb" onClick={() => onAction({ type: 'MARK_WATCHED', payload: { videoId: video.id, watched: true } })}>
       {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span className="thumb-fallback"><Play /></span>}
@@ -77,7 +85,7 @@ function VideoCard({ video, watched, onAction }: { video: Video; watched: boolea
     <div className="video-body">
       <a className="video-title" href={video.url} target="_blank" rel="noreferrer">{video.title}</a>
       <span className="channel-title">{video.channelTitle}</span>
-      <span className="video-meta"><Clock3 size={13} />{video.publishedLabel || 'Đã lưu gần đây'}{video.viewCount ? ` · ${Intl.NumberFormat('vi', { notation: 'compact' }).format(video.viewCount)} lượt xem` : ''}</span>
+      <span className="video-meta"><Clock3 size={13} />{formatPublishedAt(video)}{video.viewCount ? ` · ${Intl.NumberFormat('vi', { notation: 'compact' }).format(video.viewCount)} lượt xem` : ''}</span>
       <div className="card-actions">
         <button onClick={() => onAction({ type: 'MARK_WATCHED', payload: { videoId: video.id, watched: !watched } })}>{watched ? <Eye size={15} /> : <Check size={15} />}{watched ? 'Chưa xem' : 'Đã xem'}</button>
         <button className="icon-action" title="Ẩn video" onClick={() => onAction({ type: 'HIDE_VIDEO', payload: { videoId: video.id, hidden: true } })}><EyeOff size={15} /></button>
@@ -86,30 +94,11 @@ function VideoCard({ video, watched, onAction }: { video: Video; watched: boolea
   </article>;
 }
 
-interface FeedSection { id: string; title: string; detail: string; videos: Video[] }
-
-export function groupFeedSections(videos: Video[], now = Date.now()): FeedSection[] {
-  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
-  const weekAgo = startOfToday.getTime() - 6 * 86_400_000;
-  const buckets: FeedSection[] = [
-    { id: 'live', title: 'Live & sắp phát', detail: 'Nội dung cần chú ý ngay', videos: [] },
-    { id: 'today', title: 'Mới hôm nay', detail: 'Video mới nhất từ subscriptions', videos: [] },
-    { id: 'week', title: '7 ngày gần đây', detail: 'Danh sách để xem tiếp', videos: [] },
-    { id: 'older', title: 'Cũ hơn', detail: 'Video chưa xem còn lại', videos: [] }
-  ];
-  for (const video of videos) {
-    const timestamp = Date.parse(video.publishedAt ?? video.discoveredAt);
-    if (video.contentType === 'live' || video.contentType === 'upcoming') buckets[0]!.videos.push(video);
-    else if (timestamp >= startOfToday.getTime()) buckets[1]!.videos.push(video);
-    else if (timestamp >= weekAgo) buckets[2]!.videos.push(video);
-    else buckets[3]!.videos.push(video);
-  }
-  return buckets.filter((section) => section.videos.length);
-}
-
 export function FeedView({ state, act, compact = false }: { state: AppState; act: (message: AppMessage) => Promise<unknown>; compact?: boolean }) {
   const [filter, setFilter] = useState<FeedFilter>({ ...DEFAULT_FILTER, groupId: state.settings.defaultGroupId });
   const [refreshing, setRefreshing] = useState(false);
+  const [perChannel, setPerChannel] = useState(25);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
   const videos = useMemo(() => selectFeed(state, filter), [state, filter]);
   const sections = useMemo(() => groupFeedSections(videos), [videos]);
   const changeFilter = (next: FeedFilter) => {
@@ -117,13 +106,27 @@ export function FeedView({ state, act, compact = false }: { state: AppState; act
     setFilter(next);
     if (changedGroup && next.groupId) {
       setRefreshing(true);
-      void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: next.groupId } }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể tải feed của group.')).finally(() => setRefreshing(false));
+      setPerChannel(25);
+      void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: next.groupId, perChannel: 25 } }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể tải feed của group.')).finally(() => setRefreshing(false));
     }
   };
   const refreshCurrent = () => {
     setRefreshing(true);
-    void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: filter.groupId } }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể làm mới feed.')).finally(() => setRefreshing(false));
+    void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: filter.groupId, perChannel } }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể làm mới feed.')).finally(() => setRefreshing(false));
   };
+  const loadMore = () => {
+    if (refreshing || perChannel >= 500) return;
+    const next = Math.min(500, perChannel + 25);
+    setPerChannel(next); setRefreshing(true);
+    void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: filter.groupId, perChannel: next } }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể tải thêm video.')).finally(() => setRefreshing(false));
+  };
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) loadMore(); }, { rootMargin: '240px' });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [refreshing, perChannel, filter.groupId]);
   const playAll = () => {
     if (!videos.length) return;
     const ids = videos.slice(0, 50).map((video) => video.id).join(',');
@@ -132,6 +135,6 @@ export function FeedView({ state, act, compact = false }: { state: AppState; act
   return <div className="feed-view">
     <FeedControls state={state} filter={filter} onChange={changeFilter} compact={compact} />
     <div className="feed-heading"><span><strong>{videos.length}</strong> video {filter.watched === 'unwatched' ? 'chưa xem' : ''}</span><div className="feed-actions"><button className="secondary small" disabled={refreshing} onClick={refreshCurrent}><RefreshCw className={refreshing ? 'spin' : ''} size={15} />{refreshing ? 'Đang tải' : 'Làm mới'}</button><button className="primary small" disabled={!videos.length} onClick={playAll}><Play size={15} />Phát tất cả</button></div></div>
-    {!videos.length ? <EmptyState title={refreshing ? 'Đang tải video của group…' : 'Chưa có video chưa xem'} detail={filter.groupId ? 'Extension sẽ tải video mới từ tất cả channel thuộc group này. Bạn cũng có thể chọn “Đã xem: Tất cả” để xem lại.' : 'Bấm “Làm mới” để tải video từ YouTube API, hoặc mở Home/Subscriptions để thu thập nội dung đang hiển thị.'} /> : <div className="feed-sections">{sections.map((section) => <section className="feed-section" key={section.id}><header><div><h2>{section.title}</h2><p>{section.detail}</p></div><span>{section.videos.length}</span></header><div className={compact ? 'video-grid compact' : 'video-grid'}>{section.videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div></section>)}</div>}
+    {!videos.length ? <EmptyState title={refreshing ? 'Đang tải video của group…' : 'Chưa có video chưa xem'} detail={filter.groupId ? 'Extension sẽ tải video mới từ tất cả channel thuộc group này. Bạn cũng có thể chọn “Đã xem: Tất cả” để xem lại.' : 'Bấm “Làm mới” để tải video từ YouTube API.'} /> : <div className="feed-sections">{sections.map((section) => <section className="feed-section" key={section.id}><header><div><h2>{section.title}</h2><p>{section.detail}</p></div><span>{section.videos.length}</span></header><div className={compact ? 'video-grid compact' : 'video-grid'}>{section.videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div></section>)}<div ref={loadMoreRef} className="load-more"><button className="secondary" disabled={refreshing || perChannel >= 500} onClick={loadMore}><RefreshCw className={refreshing ? 'spin' : ''} size={16} />{refreshing ? 'Đang lấy thêm video…' : perChannel >= 500 ? 'Đã tải tối đa trong phạm vi 1 năm' : 'Tải thêm video chưa xem'}</button></div></div>}
   </div>;
 }

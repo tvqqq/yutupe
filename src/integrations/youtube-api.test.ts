@@ -23,4 +23,15 @@ describe('fetchUploadFeed', () => {
     expect(result.skippedChannels).toMatchObject([{ channelId: 'bad', playlistId: 'UU-bad' }]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it('does not classify an ended live stream as currently live', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'ended-live' }, snippet: { title: 'Ended stream', channelTitle: 'Channel', publishedAt: '2026-01-01T00:00:00Z' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: 'ended-live', contentDetails: { duration: 'PT1H' }, snippet: { liveBroadcastContent: 'none' }, liveStreamingDetails: { actualEndTime: '2026-01-01T01:00:00Z' } }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchUploadFeed('token', [channel('channel', 'UU-channel')]);
+
+    expect(result.videos[0]?.contentType).toBe('video');
+  });
 });

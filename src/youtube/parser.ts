@@ -37,10 +37,11 @@ function idFromChannelUrl(href: string): string {
 }
 
 function contentTypeFor(card: Element, url: string, durationSeconds?: number): ContentType {
-  const text = card.textContent?.toLocaleLowerCase() ?? '';
+  const badges = [...card.querySelectorAll<HTMLElement>('ytd-badge-supported-renderer, .badge-shape-wiz__text, ytd-thumbnail-overlay-time-status-renderer')]
+    .map((item) => item.textContent?.trim().toLocaleLowerCase() ?? '');
   if (url.includes('/shorts/')) return 'short';
-  if (text.includes('upcoming') || text.includes('sắp công chiếu')) return 'upcoming';
-  if (text.includes('live') || text.includes('trực tiếp')) return 'live';
+  if (badges.some((text) => text === 'upcoming' || text === 'sắp công chiếu')) return 'upcoming';
+  if (badges.some((text) => text === 'live' || text === 'trực tiếp')) return 'live';
   if (durationSeconds !== undefined && durationSeconds <= 60) return 'short';
   return 'video';
 }

@@ -26,6 +26,7 @@ export interface Channel {
   status: ChannelStatus;
   tags: string[];
   subscriptionId?: string;
+  subscribedAt?: string;
   uploadsPlaylistId?: string;
   description?: string;
 }

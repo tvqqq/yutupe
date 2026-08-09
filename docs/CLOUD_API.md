@@ -45,6 +45,26 @@ Response:
 
 Backend giữ model API key; extension không chứa AI provider secret.
 
+## AI groups
+
+```http
+POST /v1/ai/groups
+```
+
+Request:
+
+```json
+{"channels":[{"id":"UC...","title":"...","description":"...","url":"..."}]}
+```
+
+Response:
+
+```json
+{"groups":[{"name":"Technology","icon":"💻","color":"#22d3ee","channelIds":["UC..."]}]}
+```
+
+Backend chỉ được trả channel ID có trong request. Extension validate lại IDs trước khi cập nhật groups.
+
 ## Register WebSub
 
 ```http

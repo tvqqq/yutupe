@@ -1,7 +1,7 @@
 import type { AppState, Channel, FeedFilter, Group, Video } from './types';
 
 export const STORAGE_KEY = 'youtube-collections-state-v1';
-export const MAX_CACHED_VIDEOS = 2_000;
+export const MAX_CACHED_VIDEOS = 8_000;
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -128,4 +128,14 @@ export function selectFeed(state: AppState, filter: FeedFilter): Video[] {
 export function groupChannelCount(group: Group, channels: Channel[]): number {
   const ids = new Set(channels.map((channel) => channel.id));
   return group.channelIds.filter((id) => ids.has(id)).length;
+}
+
+export function retainOnlyChannelIds(state: AppState, channelIds: Iterable<string>): AppState {
+  const ids = new Set(channelIds);
+  return {
+    ...state,
+    channels: state.channels.filter((channel) => ids.has(channel.id)),
+    groups: state.groups.map((group) => ({ ...group, channelIds: group.channelIds.filter((id) => ids.has(id)) })),
+    videos: state.videos.filter((video) => ids.has(video.channelId))
+  };
 }

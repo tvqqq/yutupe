@@ -47,6 +47,13 @@ export async function suggestAiTags(baseUrl: string, accessToken: string, channe
   });
 }
 
+export async function organizeChannelsWithAi(baseUrl: string, accessToken: string, channels: Channel[]): Promise<{ groups: Array<{ name: string; icon?: string; color?: string; channelIds: string[] }> }> {
+  return request(baseUrl, '/v1/ai/groups', accessToken, {
+    method: 'POST',
+    body: JSON.stringify({ channels: channels.map(({ id, title, description, url }) => ({ id, title, description, url })) })
+  });
+}
+
 export async function registerWebSub(baseUrl: string, accessToken: string, channelIds: string[]): Promise<{ registered: number }> {
   return request(baseUrl, '/v1/websub/subscriptions', accessToken, {
     method: 'POST', body: JSON.stringify({ channelIds })

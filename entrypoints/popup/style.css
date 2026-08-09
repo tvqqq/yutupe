@@ -29,3 +29,16 @@
 .tag-editor .field { height: 36px; min-height: 36px; font-size: 12px; }.spark-button, .muted { font-size: 12px; }
 .status-badge { font-size: 12px; }.settings-card strong { font-size: 15px; }.settings-card span { font-size: 13px; }
 .mvp-note strong { font-size: 14px; }.mvp-note p, .integration-notice { font-size: 13px; }.integration-meta { font-size: 12px; }
+.modal:has(.group-channel-manager) { width: min(680px, calc(100vw - 40px)); max-height: calc(100vh - 80px); overflow: auto; }
+.group-channel-list { max-height: 260px; overflow: auto; display: grid; gap: 5px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.group-channel-list label { min-height: 42px; display: grid; grid-template-columns: 20px 30px 1fr; align-items: center; gap: 9px; padding: 5px 7px; border-radius: 8px; cursor: pointer; }
+.group-channel-list label:hover { background: var(--surface-2); }.group-channel-list img, .group-channel-list label > span { width: 30px; height: 30px; object-fit: cover; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); }
+.channel-row { grid-template-columns: 18px minmax(220px, 1.25fr) minmax(170px, .8fr) minmax(180px, .7fr) 40px; overflow: visible; }
+.channel-stats { display: grid; gap: 4px; }.channel-stats strong { font-size: 13px; }.channel-stats span { color: var(--muted); font-size: 12px; }
+.group-dropdown { position: relative; }.group-dropdown summary { min-height: 38px; padding: 0 11px; display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); cursor: pointer; font-size: 13px; }
+.group-dropdown[open] > div { position: absolute; z-index: 5; top: calc(100% + 5px); right: 0; width: 240px; max-height: 260px; overflow: auto; padding: 7px; display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); }
+.group-dropdown label { min-height: 38px; padding: 5px 7px; display: grid; grid-template-columns: 18px 24px 1fr; align-items: center; gap: 7px; border-radius: 8px; cursor: pointer; }.group-dropdown label:hover { background: var(--surface-2); }
+.group-dropdown summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ai-organize { margin-bottom: 10px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid color-mix(in srgb, var(--brand-2) 38%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--brand-2) 7%, var(--surface)); }.ai-organize > div { display: flex; align-items: center; gap: 10px; color: var(--brand-2); }.ai-organize span { display: grid; gap: 2px; color: var(--text); }.ai-organize small { color: var(--muted); font-size: 12px; }
+.suggest-search { display: grid; grid-template-columns: 1fr auto; gap: 9px; }.suggest-topics { margin-top: 10px; display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; }
+.assigned-group-pills { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }.assigned-group-pills > span { min-height: 22px; padding: 2px 7px 2px 3px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid; border-radius: 99px; font-size: 11px; font-weight: 700; }.assigned-group-pills .group-icon { border-radius: 50%; font-size: 10px; }

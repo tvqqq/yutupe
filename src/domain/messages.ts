@@ -15,11 +15,13 @@ export type AppMessage =
   | { type: 'CONNECT_GOOGLE' }
   | { type: 'DISCONNECT_GOOGLE' }
   | { type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' }
-  | { type: 'REFRESH_YOUTUBE_FEED'; payload: { groupId: string | null } }
+  | { type: 'REFRESH_YOUTUBE_FEED'; payload: { groupId: string | null; perChannel?: number } }
   | { type: 'UNSUBSCRIBE_CHANNELS'; payload: { channelIds: string[] } }
   | { type: 'DRIVE_PUSH' }
   | { type: 'DRIVE_PULL' }
   | { type: 'AI_TAG_CHANNEL'; payload: { channelId: string } }
+  | { type: 'AI_ORGANIZE_CHANNELS' }
+  | { type: 'FETCH_SUGGESTIONS'; payload: { query?: string } }
   | { type: 'REGISTER_WEBSUB' }
   | { type: 'POLL_CLOUD_EVENTS' }
   | { type: 'GRANT_CLOUD_PERMISSION'; payload: { baseUrl: string } }

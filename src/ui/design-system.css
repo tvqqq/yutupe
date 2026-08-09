@@ -108,3 +108,4 @@ select, .field { min-height: 38px; border: 1px solid var(--line); background: va
 .ytc-root .card-actions button { min-height: 34px; padding-inline: 10px; font-size: 13px; }
 .ytc-root .empty strong { font-size: 17px; }
 .ytc-root .empty span { max-width: 440px; font-size: 14px; }
+.load-more { min-height: 90px; display: grid; place-items: center; }
