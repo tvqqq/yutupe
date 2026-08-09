@@ -27,7 +27,12 @@ export function createInitialState(): AppState {
       initialDiscoveryComplete: false,
       googleClientId: '',
       cloudApiBaseUrl: '',
-      youtubeSyncChannelLimit: 25
+      cloudPermissionGranted: false,
+      cloudHealthy: false,
+      youtubeSyncChannelLimit: 25,
+      enrichmentStatus: 'idle',
+      enrichmentCursor: 0,
+      enrichmentTotal: 0
     },
     updatedAt: now
   };

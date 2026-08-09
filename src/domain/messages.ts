@@ -4,6 +4,7 @@ export type AppMessage =
   | { type: 'GET_STATE' }
   | { type: 'UPSERT_GROUP'; payload: Partial<Group> & Pick<Group, 'name' | 'icon' | 'color'> }
   | { type: 'DELETE_GROUP'; payload: { groupId: string } }
+  | { type: 'REORDER_GROUP'; payload: { groupId: string; direction: 'up' | 'down' } }
   | { type: 'SET_CHANNEL_GROUPS'; payload: { channelId: string; groupIds: string[] } }
   | { type: 'UPDATE_CHANNEL_TAGS'; payload: { channelId: string; tags: string[] } }
   | { type: 'REMOVE_CHANNEL_LOCAL'; payload: { channelId: string } }
@@ -24,11 +25,13 @@ export type AppMessage =
   | { type: 'FETCH_SUGGESTIONS'; payload: { query?: string } }
   | { type: 'REGISTER_WEBSUB' }
   | { type: 'POLL_CLOUD_EVENTS' }
+  | { type: 'CHECK_CLOUD_STATUS' }
   | { type: 'GRANT_CLOUD_PERMISSION'; payload: { baseUrl: string } }
   | { type: 'IMPORT_STATE'; payload: unknown }
   | { type: 'RESET_STATE' }
   | { type: 'OPEN_PANEL' }
-  | { type: 'TOGGLE_PANEL' };
+  | { type: 'TOGGLE_PANEL' }
+  | { type: 'ENRICH_CHANNEL_BATCH' };
 
 export interface AppResponse {
   ok: boolean;

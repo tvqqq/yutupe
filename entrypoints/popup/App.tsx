@@ -1,4 +1,4 @@
-import { Bell, Check, Download, FolderKanban, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bell, Check, Download, FolderKanban, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
 import { groupChannelCount } from '@/src/domain/state';
@@ -74,12 +74,13 @@ function GroupForm({ group, channels, onClose, act }: { group?: Group; channels:
 
 function GroupsPage({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const [editing, setEditing] = useState<Group | 'new' | null>(null);
+  const orderedGroups = state.groups.slice().sort((a, b) => a.position - b.position);
   return <section className="page">
     <div className="section-title"><div><h1>Groups</h1><p>Tổ chức subscription thành các bộ sưu tập theo chủ đề.</p></div><button className="primary" onClick={() => setEditing('new')}><Plus size={16} />Tạo group</button></div>
-    {!state.groups.length ? <EmptyState title="Chưa có group" detail="Tạo group đầu tiên, sau đó mở Channels để thêm kênh." /> : <div className="group-grid">{state.groups.map((group) => <article className="group-card" key={group.id}>
+    {!orderedGroups.length ? <EmptyState title="Chưa có group" detail="Tạo group đầu tiên, sau đó mở Channels để thêm kênh." /> : <div className="group-grid">{orderedGroups.map((group, index) => <article className="group-card" key={group.id}>
       <GroupIcon group={group} size={42} /><div className="group-card-body"><strong>{group.name}</strong><span>{groupChannelCount(group, state.channels)} channels</span></div>
       <label className="switch-row"><Bell size={14} />Thông báo<input type="checkbox" checked={group.notifications} onChange={() => void act({ type: 'UPSERT_GROUP', payload: { ...group, notifications: !group.notifications } })} /></label>
-      <div className="group-card-actions"><button className="secondary small" onClick={() => setEditing(group)}>Chỉnh sửa</button><button className="ghost danger-text" title="Xóa group" onClick={() => confirm(`Xóa group “${group.name}”?`) && void act({ type: 'DELETE_GROUP', payload: { groupId: group.id } })}><Trash2 size={15} /></button></div>
+      <div className="group-card-actions"><div className="group-priority"><button className="ghost small" disabled={index === 0} title="Ưu tiên hiển thị trước" onClick={() => void act({ type: 'REORDER_GROUP', payload: { groupId: group.id, direction: 'up' } })}><ArrowUp size={15} /></button><button className="ghost small" disabled={index === orderedGroups.length - 1} title="Chuyển xuống sau" onClick={() => void act({ type: 'REORDER_GROUP', payload: { groupId: group.id, direction: 'down' } })}><ArrowDown size={15} /></button><span>Ưu tiên {index + 1}</span></div><button className="secondary small" onClick={() => setEditing(group)}>Chỉnh sửa</button><button className="ghost danger-text" title="Xóa group" onClick={() => confirm(`Xóa group “${group.name}”?`) && void act({ type: 'DELETE_GROUP', payload: { groupId: group.id } })}><Trash2 size={15} /></button></div>
     </article>)}</div>}
     {editing && <GroupForm group={editing === 'new' ? undefined : editing} channels={state.channels} act={act} onClose={() => setEditing(null)} />}
   </section>;
@@ -109,9 +110,13 @@ function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessa
   const [sort, setSort] = useState<'az' | 'recent' | 'latest-video'>('az');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const enrichmentTotal = state.settings.enrichmentTotal ?? 0;
+  const enrichmentCursor = Math.min(state.settings.enrichmentCursor ?? 0, enrichmentTotal);
+  const enrichmentPercent = enrichmentTotal ? Math.round(enrichmentCursor / enrichmentTotal * 100) : 100;
   const channels = useMemo(() => state.channels.filter((channel) => channel.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => sort === 'az' ? a.title.localeCompare(b.title) : sort === 'latest-video' ? Date.parse(b.lastPublishedAt ?? '1970-01-01') - Date.parse(a.lastPublishedAt ?? '1970-01-01') : Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)), [state.channels, query, sort]);
   return <section className="page">
     <div className="section-title"><div><h1>Channels</h1><p>Quản lý subscriptions, thông tin channel và gán nhiều group.</p></div><div className="channel-actions"><button className="secondary small" disabled={busy} onClick={() => { setBusy(true); void act({ type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' }).catch((error) => alert(error instanceof Error ? error.message : 'Sync thất bại')).finally(() => setBusy(false)); }}><RefreshCw size={14} />Sync YouTube</button><button className="secondary small" disabled={busy} onClick={() => { setBusy(true); void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } }).catch((error) => alert(error instanceof Error ? error.message : 'Refresh thất bại')).finally(() => setBusy(false)); }}>Refresh feed</button>{selected.size > 0 && <button className="danger-button small" disabled={busy} onClick={() => { const names = state.channels.filter((item) => selected.has(item.id)).map((item) => item.title); if (!confirm(`UNSUBSCRIBE thật ${names.length} channel trên YouTube?\n\n${names.join('\n')}`)) return; setBusy(true); void act({ type: 'UNSUBSCRIBE_CHANNELS', payload: { channelIds: [...selected] } }).then(() => setSelected(new Set())).catch((error) => alert(error instanceof Error ? error.message : 'Unsubscribe thất bại')).finally(() => setBusy(false)); }}><Trash2 size={14} />Unsubscribe {selected.size}</button>}</div></div>
+    {state.settings.enrichmentStatus === 'running' && <div className="enrichment-progress"><div><RefreshCw className="spin" size={16} /><span><strong>Subscriptions đã sẵn sàng</strong><small>Đang bổ sung video mới nhất trong nền: {enrichmentCursor}/{enrichmentTotal} channels</small></span></div><div><span style={{ width: `${enrichmentPercent}%` }} /></div></div>}
     <div className="ai-organize"><div><Sparkles size={18} /><span><strong>AI Groups</strong><small>{state.settings.cloudApiBaseUrl ? 'Dùng AI cloud để tạo và phân loại groups.' : 'Chưa có Cloud API: dùng Smart Groups local, không cần cấu hình thêm.'}</small></span></div><button className="secondary" disabled={busy || !state.channels.length} onClick={() => { setBusy(true); void act({ type: 'AI_ORGANIZE_CHANNELS' }).catch((error) => alert(error instanceof Error ? error.message : 'Phân loại groups thất bại')).finally(() => setBusy(false)); }}><Sparkles size={15} />{state.settings.cloudApiBaseUrl ? 'Tạo groups bằng AI' : 'Tạo Smart Groups'}</button></div>
     <div className="channel-toolbar"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm channel…" /><select value={sort} onChange={(event) => setSort(event.target.value as 'az' | 'recent' | 'latest-video')}><option value="az">A–Z</option><option value="latest-video">Video hoạt động gần đây</option><option value="recent">Phát hiện gần đây</option></select></div>
     {!channels.length ? <EmptyState title="Chưa tìm thấy channel" detail="Kết nối Google rồi bấm Sync YouTube, hoặc cuộn trang YouTube để thu thập local." /> : <div className="channel-list">{channels.map((channel) => <ChannelRow key={channel.id} channel={channel} state={state} act={act} selected={selected.has(channel.id)} onSelect={() => setSelected((current) => { const next = new Set(current); if (next.has(channel.id)) next.delete(channel.id); else next.add(channel.id); return next; })} />)}</div>}
@@ -124,16 +129,24 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
   const [notice, setNotice] = useState('');
   const manifestClientId = browser.runtime.getManifest().oauth2?.client_id;
   const hasGoogleClientId = Boolean(manifestClientId || state.settings.googleClientId.trim());
+  const hasCloudUrl = Boolean(state.settings.cloudApiBaseUrl.trim());
+  const cloudReady = hasCloudUrl && Boolean(state.settings.cloudPermissionGranted);
   const run = async (label: string, message: AppMessage) => {
     setBusy(label); setNotice('');
     try {
       const response = await act(message) as AppResponse;
       if (response.authStatus) setAuth(response.authStatus);
-      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }> } | undefined;
+      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; registered?: number; queued?: number; permissionGranted?: boolean; status?: { activeSubscriptions?: number; pendingSubscriptions?: number } } | undefined;
       const skipped = feedReport?.skippedChannels ?? [];
-      setNotice(skipped.length
-        ? `${label}: tải ${feedReport?.videoCount ?? 0} video; bỏ qua ${skipped.length} channel không còn uploads playlist (${skipped.map((item) => item.channelTitle).join(', ')}).`
-        : `${label}: hoàn tất${feedReport?.videoCount !== undefined ? `, tải ${feedReport.videoCount} video` : ''}.`);
+      setNotice(feedReport?.granted
+        ? 'Cloud API đã được cấp quyền và health check thành công.'
+        : feedReport?.permissionGranted === false
+          ? 'Origin Cloud chưa được cấp quyền. Hãy bấm “Cho phép Cloud API”.'
+          : feedReport?.registered !== undefined
+            ? `Đã đưa ${feedReport.registered} channels vào hàng đợi WebSub; active ${feedReport.status?.activeSubscriptions ?? 0}, pending ${feedReport.status?.pendingSubscriptions ?? feedReport.queued ?? 0}.`
+            : skipped.length
+              ? `${label}: tải ${feedReport?.videoCount ?? 0} video; bỏ qua ${skipped.length} channel không còn uploads playlist (${skipped.map((item) => item.channelTitle).join(', ')}).`
+              : `${label}: hoàn tất${feedReport?.videoCount !== undefined ? `, tải ${feedReport.videoCount} video` : ''}.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : `${label}: thất bại.`); }
     finally { setBusy(''); }
   };
@@ -141,7 +154,11 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
   return <div className="integration-section">
     <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>OAuth token chỉ lưu trong browser session và phải kết nối lại sau khi restart.</p></div><span className={auth.connected ? 'status-badge connected' : 'status-badge'}>{auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
     <label className="form-label">Google OAuth Client ID<input className="field" value={state.settings.googleClientId} placeholder={manifestClientId ? 'Đã cấu hình trong manifest build' : '...apps.googleusercontent.com'} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { googleClientId: event.target.value } })} /></label>
-    <label className="form-label">Cloud API Base URL<input className="field" value={state.settings.cloudApiBaseUrl} placeholder="https://api.example.com" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { cloudApiBaseUrl: event.target.value } })} /></label>
+    <label className="form-label">Cloud API Base URL<input className="field" value={state.settings.cloudApiBaseUrl} placeholder="https://youtube-collections-cloud.your-account.workers.dev" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { cloudApiBaseUrl: event.target.value.trim(), cloudPermissionGranted: false, cloudHealthy: false } })} /></label>
+    <div className={`cloud-status-card ${state.settings.cloudHealthy ? 'healthy' : ''}`}>
+      <span className="cloud-status-dot" />
+      <div><strong>{state.settings.cloudHealthy ? 'Cloud đang hoạt động' : hasCloudUrl ? 'Cloud chưa được xác minh' : 'Cloud chưa cấu hình'}</strong><small>{state.settings.cloudHealthy ? `AI ${state.settings.cloudAiConfigured ? `sẵn sàng · ${state.settings.cloudAiModel ?? 'model đã cấu hình'}` : 'chưa có API key'} · WebSub ${state.settings.webSubActiveCount ?? 0} active / ${state.settings.webSubPendingCount ?? 0} pending` : 'Deploy backend, nhập HTTPS URL rồi cấp quyền cho extension.'}</small></div>
+    </div>
     <label className="form-label">Số channel tối đa mỗi lần refresh feed<input className="field" type="number" min="1" max="100" value={state.settings.youtubeSyncChannelLimit} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { youtubeSyncChannelLimit: Math.max(1, Math.min(100, Number(event.target.value) || 25)) } })} /></label>
     <div className="integration-actions">
       {!auth.connected ? <button className="primary" disabled={Boolean(busy) || !hasGoogleClientId} onClick={() => void run('Kết nối Google', { type: 'CONNECT_GOOGLE' })}>Kết nối Google</button> : <button className="secondary" disabled={Boolean(busy)} onClick={() => void run('Ngắt kết nối', { type: 'DISCONNECT_GOOGLE' })}>Ngắt kết nối</button>}
@@ -149,12 +166,13 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Refresh API feed', { type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } })}>Refresh feed</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Drive backup', { type: 'DRIVE_PUSH' })}>Push Drive</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => confirm('Pull Drive sẽ thay thế groups, channel assignments và watched state hiện tại. Tiếp tục?') && void run('Drive restore', { type: 'DRIVE_PULL' })}>Pull Drive</button>
-      <button className="secondary" disabled={Boolean(busy) || !state.settings.cloudApiBaseUrl} onClick={() => void run('Cloud permission', { type: 'GRANT_CLOUD_PERMISSION', payload: { baseUrl: state.settings.cloudApiBaseUrl } })}>Cho phép Cloud API</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !state.settings.cloudApiBaseUrl} onClick={() => void run('WebSub registration', { type: 'REGISTER_WEBSUB' })}>Register WebSub</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !state.settings.cloudApiBaseUrl} onClick={() => void run('Cloud events', { type: 'POLL_CLOUD_EVENTS' })}>Poll cloud events</button>
+      <button className="secondary" disabled={Boolean(busy) || !hasCloudUrl} onClick={() => void run('Cloud permission', { type: 'GRANT_CLOUD_PERMISSION', payload: { baseUrl: state.settings.cloudApiBaseUrl } })}>Xác minh Cloud API</button>
+      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud status', { type: 'CHECK_CLOUD_STATUS' })}>Kiểm tra Cloud</button>
+      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady || !state.channels.length} onClick={() => void run('WebSub registration', { type: 'REGISTER_WEBSUB' })}>Đăng ký WebSub</button>
+      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud events', { type: 'POLL_CLOUD_EVENTS' })}>Đồng bộ events</button>
     </div>
     {notice && <p className="integration-notice">{notice}</p>}
-    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'}</p>
+    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'} · Cloud poll: {state.settings.lastCloudPollAt ?? 'chưa chạy'}</p>
   </div>;
 }
 

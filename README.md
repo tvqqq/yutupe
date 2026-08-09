@@ -12,7 +12,8 @@ Chrome/Edge Manifest V3 extension để nhóm subscriptions và xem focused feed
 - Feed thật từ uploads playlists, bổ sung duration/statistics từ YouTube Data API.
 - Bulk unsubscribe thật có danh sách preview và xác nhận.
 - Google Drive `appDataFolder` push/pull groups, channels và watched state.
-- AI tags và WebSub event inbox qua configurable Cloud API.
+- AI tags/groups thật qua Cloudflare Workers AI; có thể override bằng OpenAI server-side.
+- WebSub push backend, per-user event inbox và tự gia hạn subscriptions.
 - Import/export JSON và local notifications.
 
 ## Chạy local
@@ -29,6 +30,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm build:edge
+pnpm cloud:check
 ```
 
 Load `.output/chrome-mv3` tại `chrome://extensions` hoặc `.output/edge-mv3` tại `edge://extensions`.
@@ -53,12 +55,14 @@ Chrome/Edge nên có OAuth client riêng. Nếu build chưa chứa manifest `oau
 4. Tạo group trong tab Groups và gán channel trong tab Channels.
 5. Chọn nhiều channel → **Unsubscribe** để xem preview và xác nhận trước khi gọi API thật.
 6. Dùng Push/Pull Drive để backup hoặc restore.
+7. Deploy backend theo `cloud/README.md`, nhập Worker URL, cấp quyền Cloud rồi đăng ký WebSub.
 
 ## Tài liệu
 
 - [Kiến trúc](docs/ARCHITECTURE.md)
 - [Google OAuth/API setup](docs/GOOGLE_SETUP.md)
 - [Cloud API contract](docs/CLOUD_API.md)
+- [Cloud backend deploy](cloud/README.md)
 - [Developer handover](docs/HANDOVER.md)
 - [Testing checklist](docs/TESTING.md)
 - [Privacy baseline](docs/PRIVACY.md)
@@ -67,6 +71,6 @@ Chrome/Edge nên có OAuth client riêng. Nếu build chưa chứa manifest `oau
 
 - Không có credential Google/backend trong repo; integration chỉ chạy sau khi developer cấu hình project tương ứng.
 - Drive pull dùng cloud-wins snapshot, chưa có per-entity tombstone conflict resolution.
-- WebSub callback và AI inference phải được triển khai ở backend theo contract.
+- Cloud backend đã nằm trong repo nhưng cần developer deploy D1 Worker và cấu hình secrets/origins.
 - OAuth access token chỉ giữ trong `storage.session`; người dùng kết nối lại sau khi restart browser.
 - Dead-channel classification và Deck view chưa hoàn thiện.

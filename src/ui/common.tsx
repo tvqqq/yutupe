@@ -40,7 +40,7 @@ export function FeedControls({ state, filter, onChange, compact = false }: {
   return <div className={compact ? 'controls controls-compact' : 'controls'}>
     <div className="group-strip">
       <button className={!filter.groupId ? 'chip active' : 'chip'} onClick={() => onChange({ ...filter, groupId: null })}>Tất cả <span className="chip-count">{unreadCount()}</span></button>
-      {state.groups.map((group) => <button key={group.id} className={filter.groupId === group.id ? 'chip active' : 'chip'} onClick={() => onChange({ ...filter, groupId: group.id, watched: 'unwatched' })}><GroupIcon group={group} size={20} />{group.name}<span className="chip-count">{unreadCount(group.channelIds)}</span></button>)}
+      {state.groups.slice().sort((a, b) => a.position - b.position).map((group) => <button key={group.id} className={filter.groupId === group.id ? 'chip active' : 'chip'} onClick={() => onChange({ ...filter, groupId: group.id, watched: 'unwatched' })}><GroupIcon group={group} size={20} />{group.name}<span className="chip-count">{unreadCount(group.channelIds)}</span></button>)}
     </div>
     <div className="filter-row">
       <label className="search"><Search size={15} /><input value={filter.query} onChange={(event) => onChange({ ...filter, query: event.target.value })} placeholder="Tìm video hoặc channel…" />{filter.query && <button aria-label="Xóa tìm kiếm" onClick={() => onChange({ ...filter, query: '' })}><X size={14} /></button>}</label>

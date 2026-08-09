@@ -11,6 +11,9 @@ flowchart LR
   B --> G[Google OAuth / YouTube / Drive]
   B --> API[Optional AI and WebSub API]
   B --> N[Browser notifications]
+  API --> O[Workers AI / optional OpenAI]
+  API --> D[D1 users subscriptions events]
+  H[YouTube WebSub Hub] --> API
 ```
 
 ## Runtime boundaries
@@ -34,6 +37,7 @@ Background xử lý:
 - OAuth session, YouTube API, Drive sync và cloud adapters.
 - Bulk unsubscribe tuần tự.
 - Cloud event polling và notifications.
+- Subscription sync hai phase: phase nhanh import subscriptions/channel metadata theo batch; phase nền dùng `browser.alarms` để enrich 10 uploads playlists mỗi lượt.
 
 OAuth tokens không bao giờ được gửi vào YouTube page context.
 
@@ -68,15 +72,19 @@ Drive pull hiện dùng cloud-wins cho groups/channels/watched preferences. Trư
 
 `selectFeed()` là pure function áp group, hidden, content type, duration, watched, search và sorting. API metadata có `publishedAt`; DOM-only metadata dùng `discoveredAt` fallback.
 
+Connect Google và Sync YouTube không còn đợi fetch uploads playlist của từng channel. Sau khi subscription metadata được lưu, alarm `youtube-collections-enrichment` chạy từng batch, merge video mới nhất vào cache và cập nhật `settings.enrichmentCursor/enrichmentTotal`. UI theo dõi `storage.onChanged`, nên Feed và tiến độ cập nhật dần mà không cần reload.
+
+Thứ tự group dùng `Group.position`. Mọi màn hình điều hướng Feed sort tăng dần theo field này; thao tác ưu tiên trong tab Groups hoán đổi vị trí và chuẩn hoá lại toàn bộ dãy.
+
 ## Permissions
 
 - `storage`: local/session state.
 - `identity`: Google OAuth.
 - `activeTab`: toggle workspace từ toolbar.
-- `alarms`: cloud event polling.
+- `alarms`: cloud event polling và background channel enrichment.
 - `notifications`: group notifications.
 - YouTube/Google host permissions: API calls từ background.
-- Optional HTTPS host permission: chỉ Cloud API origin người dùng nhập và approve.
+- Production Cloud host permission: giới hạn đúng `youtube-collections-cloud.qeoqeo.workers.dev`; không xin quyền động `https://*/*` từ content script.
 
 Không dùng `webRequest`, eval hoặc remote code.
 

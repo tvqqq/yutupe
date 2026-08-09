@@ -4,7 +4,7 @@ import type { AppState, Channel, Group, Video } from '@/src/domain/types';
 import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, requireIdentityToken } from '@/src/integrations/google-auth';
 import { fetchSubscriptions, fetchSuggestedVideos, fetchUploadFeed, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
-import { organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags } from '@/src/integrations/cloud-api';
+import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags } from '@/src/integrations/cloud-api';
 
 async function readState(): Promise<AppState> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
@@ -62,16 +62,6 @@ function retainOnlySubscriptions(state: AppState, apiChannels: Channel[]): AppSt
   return retainOnlyChannelIds(canonical, apiChannels.map((channel) => channel.id));
 }
 
-async function hydrateLatestUploads(state: AppState, accessToken: string): Promise<AppState> {
-  const { videos } = await fetchUploadFeed(accessToken, state.channels.filter((channel) => channel.uploadsPlaylistId), 1);
-  const latest = new Map(videos.map((video) => [video.channelId, video.publishedAt ?? video.discoveredAt]));
-  return {
-    ...state,
-    channels: state.channels.map((channel) => latest.has(channel.id) ? { ...channel, lastPublishedAt: latest.get(channel.id) } : channel),
-    videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS)
-  };
-}
-
 function organizeChannelsLocally(channels: Channel[]): Array<{ name: string; icon: string; color: string; channelIds: string[] }> {
   const rules: Array<{ name: string; icon: string; color: string; pattern: RegExp }> = [
     { name: 'Công nghệ', icon: '💻', color: '#22d3ee', pattern: /tech|code|software|ai\b|công nghệ|lập trình|điện thoại|review/iu },
@@ -102,8 +92,12 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       if (!message.payload.baseUrl) throw new Error('Hãy nhập Cloud API Base URL trước.');
       const origin = new URL(message.payload.baseUrl).origin;
       if (!origin.startsWith('https://')) throw new Error('Cloud API phải dùng HTTPS.');
-      const granted = await browser.permissions.request({ origins: [`${origin}/*`] });
-      return { ok: true, data: { granted } };
+      const granted = await browser.permissions.contains({ origins: [`${origin}/*`] });
+      if (!granted) throw new Error('Cloud origin này không có trong manifest production. Hãy dùng URL Worker đã được cấu hình và reload extension.');
+      const health = granted ? await checkCloudHealth(message.payload.baseUrl) : undefined;
+      const state = await readState();
+      const saved = await writeState({ ...state, settings: { ...state.settings, cloudPermissionGranted: granted, cloudHealthy: Boolean(health?.ok) } });
+      return { ok: true, state: saved, data: { granted, health } };
     }
 
     let state = await readState();
@@ -114,9 +108,10 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const authStatus = await connectGoogle(state.settings.googleClientId);
       const apiChannels = await fetchSubscriptions(await requireAccessToken());
       state = retainOnlySubscriptions(state, apiChannels);
-      state = await hydrateLatestUploads(state, await requireAccessToken());
-      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
-      return { ok: true, state: await writeState(state), authStatus };
+      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso(), enrichmentCursor: 0, enrichmentTotal: state.channels.length, enrichmentStatus: state.channels.length ? 'running' : 'complete' } };
+      const saved = await writeState(state);
+      if (state.channels.length) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 1_000 });
+      return { ok: true, state: saved, authStatus };
     }
 
     if (message.type === 'DISCONNECT_GOOGLE') {
@@ -128,8 +123,27 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const accessToken = await requireAccessToken();
       const apiChannels = await fetchSubscriptions(accessToken);
       state = retainOnlySubscriptions(state, apiChannels);
-      state = await hydrateLatestUploads(state, accessToken);
-      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
+      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso(), enrichmentCursor: 0, enrichmentTotal: state.channels.length, enrichmentStatus: state.channels.length ? 'running' : 'complete' } };
+      if (state.channels.length) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 1_000 });
+    }
+
+    if (message.type === 'ENRICH_CHANNEL_BATCH') {
+      if (state.settings.enrichmentStatus !== 'running') return { ok: true, state };
+      const cursor = state.settings.enrichmentCursor ?? 0;
+      const batch = state.channels.slice(cursor, cursor + 10).filter((channel) => channel.uploadsPlaylistId);
+      const { videos } = batch.length ? await fetchUploadFeed(await requireAccessToken(), batch, 1) : { videos: [] };
+      const latest = new Map(videos.map((video) => [video.channelId, video.publishedAt ?? video.discoveredAt]));
+      const nextCursor = Math.min(state.channels.length, cursor + 10);
+      const complete = nextCursor >= state.channels.length;
+      state = {
+        ...state,
+        channels: state.channels.map((channel) => latest.has(channel.id) ? { ...channel, lastPublishedAt: latest.get(channel.id) } : channel),
+        videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS),
+        settings: { ...state.settings, enrichmentCursor: nextCursor, enrichmentTotal: state.channels.length, enrichmentStatus: complete ? 'complete' : 'running', lastEnrichmentAt: complete ? nowIso() : state.settings.lastEnrichmentAt }
+      };
+      const saved = await writeState(state);
+      if (!complete) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 5_000 });
+      return { ok: true, state: saved, data: { cursor: nextCursor, total: state.channels.length, complete } };
     }
 
     if (message.type === 'REFRESH_YOUTUBE_FEED') {
@@ -221,7 +235,25 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
     if (message.type === 'REGISTER_WEBSUB') {
       const channelIds = state.channels.filter((channel) => channel.id.startsWith('UC')).map((channel) => channel.id);
       const result = await registerWebSub(state.settings.cloudApiBaseUrl, await requireIdentityToken(), channelIds);
-      return { ok: true, state, data: result };
+      const status = await getCloudStatus(state.settings.cloudApiBaseUrl, await requireIdentityToken());
+      state = { ...state, settings: { ...state.settings, cloudHealthy: status.ok, cloudAiConfigured: status.aiConfigured, cloudAiModel: status.aiModel, webSubRegisteredCount: status.subscriptions, webSubActiveCount: status.activeSubscriptions, webSubPendingCount: status.pendingSubscriptions, lastWebSubRegistrationAt: nowIso() } };
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { ...result, status } };
+    }
+
+    if (message.type === 'CHECK_CLOUD_STATUS') {
+      const origin = new URL(state.settings.cloudApiBaseUrl).origin;
+      const permissionGranted = await browser.permissions.contains({ origins: [`${origin}/*`] });
+      if (!permissionGranted) {
+        state = { ...state, settings: { ...state.settings, cloudPermissionGranted: false, cloudHealthy: false } };
+        const saved = await writeState(state);
+        return { ok: true, state: saved, data: { permissionGranted: false } };
+      }
+      const health = await checkCloudHealth(state.settings.cloudApiBaseUrl);
+      const status = await getCloudStatus(state.settings.cloudApiBaseUrl, await requireIdentityToken());
+      state = { ...state, settings: { ...state.settings, cloudPermissionGranted: true, cloudHealthy: health.ok && status.ok, cloudAiConfigured: status.aiConfigured, cloudAiModel: status.aiModel, webSubRegisteredCount: status.subscriptions, webSubActiveCount: status.activeSubscriptions, webSubPendingCount: status.pendingSubscriptions } };
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { permissionGranted: true, health, status } };
     }
 
     if (message.type === 'POLL_CLOUD_EVENTS') {
@@ -232,7 +264,7 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       state = {
         ...state,
         videos: mergeDiscoveredVideos(state.videos, acceptedEvents.map((event) => event.video)).slice(0, MAX_CACHED_VIDEOS),
-        settings: { ...state.settings, cloudEventCursor: result.cursor ?? state.settings.cloudEventCursor }
+        settings: { ...state.settings, cloudEventCursor: result.cursor ?? state.settings.cloudEventCursor, lastCloudPollAt: nowIso() }
       };
       await maybeNotify(state, fresh);
     }
@@ -258,6 +290,14 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
 
     if (message.type === 'DELETE_GROUP') {
       state = { ...state, groups: state.groups.filter((group) => group.id !== message.payload.groupId) };
+    }
+
+    if (message.type === 'REORDER_GROUP') {
+      const ordered = state.groups.slice().sort((a, b) => a.position - b.position);
+      const index = ordered.findIndex((group) => group.id === message.payload.groupId);
+      const target = message.payload.direction === 'up' ? index - 1 : index + 1;
+      if (index >= 0 && target >= 0 && target < ordered.length) [ordered[index], ordered[target]] = [ordered[target]!, ordered[index]!];
+      state = { ...state, groups: ordered.map((group, position) => ({ ...group, position, updatedAt: nowIso() })) };
     }
 
     if (message.type === 'SET_CHANNEL_GROUPS') {
@@ -381,6 +421,11 @@ export default defineBackground(() => {
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'youtube-collections-enrichment') {
+      const task = mutationQueue.then(() => handleMessage({ type: 'ENRICH_CHANNEL_BATCH' }));
+      mutationQueue = task.catch((error) => ({ ok: false, error: error instanceof Error ? error.message : 'Unknown error' }));
+      return;
+    }
     if (alarm.name !== 'youtube-collections-cloud-events') return;
     void readState().then(async (state) => {
       if (!state.settings.cloudApiBaseUrl || !(await getAuthStatus()).connected) return;

@@ -7,6 +7,7 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm build:edge
+pnpm cloud:check
 ```
 
 Unit tests hiện bao phủ domain feed, metadata parser và Drive snapshot apply.
@@ -29,7 +30,10 @@ Unit tests hiện bao phủ domain feed, metadata parser và Drive snapshot appl
 14. Với OAuth test project: connect, sync subscriptions và refresh API feed.
 15. Với disposable account: unsubscribe một test channel và kiểm tra local cleanup.
 16. Push Drive, sửa local, Pull Drive và xác nhận restore warning + kết quả.
-17. Cấp optional Cloud origin rồi test AI tag/WebSub qua staging backend.
+17. Deploy staging Worker, kiểm tra `/health`, cấp optional Cloud origin và bấm **Kiểm tra Cloud**.
+18. Chạy AI Groups, xác nhận mọi canonical channel ID chỉ thuộc một AI group và không có ID lạ.
+19. Đăng ký WebSub; status phải chuyển dần từ pending sang active theo cron.
+20. Gửi signed Atom fixture vào callback staging và xác nhận event xuất hiện sau **Đồng bộ events**.
 
 ## YouTube layouts cần kiểm tra
 

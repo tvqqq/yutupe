@@ -1,6 +1,10 @@
 # Cloud API contract
 
-AI inference và YouTube WebSub cần một HTTPS backend. Extension chỉ gọi origin mà người dùng đã nhập và cấp optional host permission.
+Contract này được implement tại `cloud/worker.ts` bằng Cloudflare Worker + D1. Extension chỉ gọi origin HTTPS mà người dùng đã nhập và cấp optional host permission.
+
+## Health và status
+
+`GET /health` public dùng để kiểm tra deployment. `GET /v1/status` yêu cầu auth và trả cấu hình AI, tổng WebSub active/pending cùng event count của user.
 
 ## Authentication
 
@@ -43,7 +47,7 @@ Response:
 {"tags":["Tech","AI"],"suggestedGroup":"Technology","confidence":0.91}
 ```
 
-Backend giữ model API key; extension không chứa AI provider secret.
+Backend dùng Workers AI binding mặc định. Nếu cấu hình `OPENAI_API_KEY`, backend chuyển sang OpenAI Responses API; extension không chứa AI provider secret.
 
 ## AI groups
 
@@ -72,7 +76,7 @@ POST /v1/websub/subscriptions
 {"channelIds":["UC...","UC..."]}
 ```
 
-Response: `{"registered":2}`.
+Response `202`: `{"registered":2,"queued":2}`. Request là snapshot đầy đủ: mapping cũ không còn trong danh sách sẽ bị bỏ. Cron xử lý hàng đợi và gia hạn lease trong nền.
 
 Backend đăng ký topic `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`, renew subscription và dedupe event.
 
@@ -95,10 +99,16 @@ Response:
 
 Extension polls mỗi 5 phút khi có Cloud URL và Google session, merges event theo video ID và phát browser notification cho group tương ứng.
 
-## Backend requirements còn lại
+## Data deletion
+
+`DELETE /v1/account` xóa users, channel mappings và event inbox của user đang xác thực.
+
+## Production requirements
 
 - HTTPS, CORS/extension-origin allowlist và rate limiting.
 - Verify auth audience/issuer/expiry.
-- Encrypt persistent data, isolate users và provide deletion endpoint.
+- D1 isolate records theo verified Google `sub`; Cloudflare chịu trách nhiệm encryption at rest của managed storage.
 - Validate channel IDs, Atom XML và event size.
-- Monitor WebSub renewal/delivery failures.
+- Monitor `channel_subscriptions.state`, `attempts`, `last_error` và cron delivery failures.
+
+Hướng dẫn deploy và secrets nằm tại `cloud/README.md`.

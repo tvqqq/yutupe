@@ -59,10 +59,23 @@ export interface Settings {
   initialDiscoveryComplete: boolean;
   googleClientId: string;
   cloudApiBaseUrl: string;
+  cloudPermissionGranted?: boolean;
+  cloudHealthy?: boolean;
+  cloudAiConfigured?: boolean;
+  cloudAiModel?: string;
+  webSubRegisteredCount?: number;
+  webSubActiveCount?: number;
+  webSubPendingCount?: number;
+  lastWebSubRegistrationAt?: string;
+  lastCloudPollAt?: string;
   youtubeSyncChannelLimit: number;
   lastYoutubeSyncAt?: string;
   lastDriveSyncAt?: string;
   cloudEventCursor?: string;
+  enrichmentCursor?: number;
+  enrichmentTotal?: number;
+  enrichmentStatus?: 'idle' | 'running' | 'complete';
+  lastEnrichmentAt?: string;
 }
 
 export interface AuthStatus {
