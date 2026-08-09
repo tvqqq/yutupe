@@ -1,15 +1,56 @@
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
-import { createInitialState, ENRICHMENT_MAX_RETRIES, makeId, MAX_CACHED_VIDEOS, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, nowIso, queueChannelsForEnrichment, retainOnlyChannelIds, STORAGE_KEY, upsertById, withEnrichmentSummary } from '@/src/domain/state';
+import { createInitialState, ENRICHMENT_MAX_RETRIES, isValidCachedVideo, makeId, MAX_CACHED_VIDEOS, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, nowIso, queueChannelsForEnrichment, retainOnlyChannelIds, sanitizeVideoCache, STORAGE_KEY, upsertById, withEnrichmentSummary } from '@/src/domain/state';
 import type { AppState, Channel, Group, Video } from '@/src/domain/types';
 import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, requireIdentityToken } from '@/src/integrations/google-auth';
-import { fetchSubscriptions, fetchSuggestedVideos, fetchUploadFeed, unsubscribe } from '@/src/integrations/youtube-api';
+import { fetchPersonalizedSuggestions, fetchRecentUploadFeed, fetchSubscriptions, fetchUploadFeed, isYouTubeQuotaExceeded, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
 import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags, suggestUnsubscriptionsWithAi } from '@/src/integrations/cloud-api';
 import { PRODUCTION_CLOUD_API_BASE_URL } from '@/src/config';
 
+function nextYouTubeQuotaReset(now = new Date()): string {
+  const dateParts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((part) => part.type === type)?.value);
+  const localMidnightAsUtc = Date.UTC(value('year'), value('month') - 1, value('day') + 1);
+  const probe = new Date(localMidnightAsUtc + 12 * 60 * 60_000);
+  const zoneName = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'longOffset' }).formatToParts(probe).find((part) => part.type === 'timeZoneName')?.value ?? 'GMT-08:00';
+  const match = zoneName.match(/GMT([+-])(\d{2}):?(\d{2})?/);
+  const offsetMinutes = match ? (match[1] === '-' ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3] ?? 0)) : -480;
+  return new Date(localMidnightAsUtc - offsetMinutes * 60_000).toISOString();
+}
+
+function quotaBlocked(state: AppState): boolean {
+  return Date.parse(state.settings.youtubeQuotaBlockedUntil ?? '') > Date.now();
+}
+
+function pacificDateKey(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+function normalizeQuotaWindow(state: AppState): AppState {
+  const date = pacificDateKey();
+  if (state.settings.youtubeQuotaDate === date) return state;
+  return { ...state, settings: { ...state.settings, youtubeQuotaDate: date, youtubeQuotaEstimatedUsed: 0, youtubeQuotaBlockedUntil: undefined } };
+}
+
+function withQuotaUsage(state: AppState, apiRequests = 0): AppState {
+  const current = normalizeQuotaWindow(state);
+  return { ...current, settings: { ...current.settings, youtubeQuotaEstimatedUsed: (current.settings.youtubeQuotaEstimatedUsed ?? 0) + apiRequests } };
+}
+
+function withQuotaStatus(state: AppState, exhausted: boolean): AppState {
+  const current = normalizeQuotaWindow(state);
+  if (!exhausted) return current;
+  return { ...current, settings: { ...current.settings, youtubeQuotaLastErrorAt: nowIso(), youtubeQuotaBlockedUntil: nextYouTubeQuotaReset() } };
+}
+
 async function readState(): Promise<AppState> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
   let state = (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
+  if (state.settings.cacheSanitizerVersion !== 2) {
+    const sanitized = sanitizeVideoCache(state);
+    state = { ...sanitized, settings: { ...sanitized.settings, cacheSanitizerVersion: 2 }, updatedAt: nowIso() };
+    await browser.storage.local.set({ [STORAGE_KEY]: state });
+  }
   if (state.settings.enrichmentStatus === 'running' && state.channels.some((channel) => !channel.enrichment)) state = queueChannelsForEnrichment(state);
   return state.settings.cloudApiBaseUrl?.trim()
     ? state
@@ -111,7 +152,13 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
 
     if (message.type === 'CONNECT_GOOGLE') {
       const authStatus = await connectGoogle(state.settings.googleClientId);
-      const apiChannels = await fetchSubscriptions(await requireAccessToken());
+      let apiChannels: Channel[];
+      try { apiChannels = await fetchSubscriptions(await requireAccessToken()); }
+      catch (error) {
+        if (!isYouTubeQuotaExceeded(error)) throw error;
+        const saved = await writeState(withQuotaStatus(state, true));
+        return { ok: true, state: saved, authStatus, data: { quotaFallback: true } };
+      }
       state = retainOnlySubscriptions(state, apiChannels);
       state = queueChannelsForEnrichment({ ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } });
       const saved = await writeState(state);
@@ -126,7 +173,13 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
 
     if (message.type === 'SYNC_YOUTUBE_SUBSCRIPTIONS') {
       const accessToken = await requireAccessToken();
-      const apiChannels = await fetchSubscriptions(accessToken);
+      let apiChannels: Channel[];
+      try { apiChannels = await fetchSubscriptions(accessToken); }
+      catch (error) {
+        if (!isYouTubeQuotaExceeded(error)) throw error;
+        const saved = await writeState(withQuotaStatus(state, true));
+        return { ok: true, state: saved, data: { quotaFallback: true } };
+      }
       state = retainOnlySubscriptions(state, apiChannels);
       state = queueChannelsForEnrichment({ ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } });
       if (state.channels.length) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 1_000 });
@@ -141,7 +194,9 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const batch = state.channels
         .filter((channel) => channel.uploadsPlaylistId && (channel.enrichment?.status === 'pending' || (channel.enrichment?.status === 'error' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES && Date.parse(channel.enrichment.nextRetryAt ?? '1970-01-01') <= now) || (channel.enrichment?.status === 'loading' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES && Date.parse(channel.enrichment.lastAttemptAt ?? '1970-01-01') <= abandonedBefore)))
         .sort((a, b) => Number(Boolean(b.enrichment?.priority)) - Number(Boolean(a.enrichment?.priority)) || Number(!b.lastPublishedAt) - Number(!a.lastPublishedAt) || Date.parse(a.enrichment?.lastAttemptAt ?? '1970-01-01') - Date.parse(b.enrichment?.lastAttemptAt ?? '1970-01-01'))
-        .slice(0, 10);
+        // RSS calls do not consume Data API quota; 50 channels also fit in one
+        // batched videos.list request for optional duration/view metadata.
+        .slice(0, 50);
       if (!batch.length) {
         const saved = await writeState(withEnrichmentSummary(state));
         return { ok: true, state: saved, data: { channels: [] } };
@@ -157,13 +212,13 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const skipped = new Set(message.payload.skippedChannelIds);
       const latest = new Map(message.payload.videos.map((video) => [video.channelId, video.publishedAt ?? video.discoveredAt]));
       const finishedAt = nowIso();
-      state = withEnrichmentSummary({
+      state = withQuotaStatus(withQuotaUsage(withEnrichmentSummary({
         ...state,
         channels: state.channels.map((channel) => !ids.has(channel.id) ? channel : skipped.has(channel.id)
           ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined, enrichment: { ...channel.enrichment, status: 'error', priority: false, retryCount: ENRICHMENT_MAX_RETRIES, error: 'Uploads playlist không còn khả dụng.', nextRetryAt: undefined } }
           : { ...channel, lastPublishedAt: latest.get(channel.id) ?? channel.lastPublishedAt, enrichment: { ...channel.enrichment, status: 'ready', priority: false, retryCount: channel.enrichment?.retryCount ?? 0, lastSuccessAt: finishedAt, error: undefined, nextRetryAt: undefined } }),
         videos: mergeDiscoveredVideos(state.videos, message.payload.videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS)
-      });
+      }), message.payload.apiRequests), Boolean(message.payload.quotaExceeded));
       const saved = await writeState(state);
       return { ok: true, state: saved, data: { complete: state.settings.enrichmentStatus !== 'running' } };
     }
@@ -189,8 +244,24 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       // The configurable limit only protects the broad "All subscriptions" refresh.
       const feedChannels = groupIds ? channels : channels.slice(0, state.settings.youtubeSyncChannelLimit);
       const perChannel = Math.max(1, Math.min(500, message.payload.perChannel ?? 25));
-      const { videos, skippedChannels } = await fetchUploadFeed(accessToken, feedChannels, perChannel);
-      const skippedIds = new Set(skippedChannels.map((item) => item.channelId));
+      state = normalizeQuotaWindow(state);
+      const projectedDeepRequests = feedChannels.length * Math.ceil(perChannel / 50) + Math.ceil(feedChannels.length * perChannel / 50);
+      const budgetWouldOverflow = (state.settings.youtubeQuotaEstimatedUsed ?? 0) + projectedDeepRequests > 8_000;
+      let useQuotaFreeRecentFeed = perChannel <= 25 || quotaBlocked(state) || budgetWouldOverflow;
+      let feedResult: Awaited<ReturnType<typeof fetchUploadFeed>>;
+      try {
+        feedResult = useQuotaFreeRecentFeed
+          ? await fetchRecentUploadFeed(accessToken, feedChannels, Math.min(perChannel, 15), !quotaBlocked(state) && (state.settings.youtubeQuotaEstimatedUsed ?? 0) < 8_000)
+          : await fetchUploadFeed(accessToken, feedChannels, perChannel, state.videos);
+      } catch (error) {
+        if (!isYouTubeQuotaExceeded(error)) throw error;
+        state = withQuotaStatus(state, true);
+        useQuotaFreeRecentFeed = true;
+        feedResult = await fetchRecentUploadFeed(accessToken, feedChannels, 15, false);
+      }
+      const { videos, skippedChannels, quotaExceeded, source } = feedResult;
+      state = withQuotaStatus(withQuotaUsage(state, feedResult.apiRequests), Boolean(quotaExceeded));
+      const skippedIds = new Set(source === 'api' ? skippedChannels.map((item) => item.channelId) : []);
       if (skippedIds.size) {
         state = { ...state, channels: state.channels.map((channel) => skippedIds.has(channel.id) ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined, enrichment: { ...channel.enrichment, status: 'error', priority: false, retryCount: ENRICHMENT_MAX_RETRIES, error: 'Uploads playlist không còn khả dụng.', nextRetryAt: undefined } } : channel) };
       }
@@ -204,7 +275,7 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       state = withEnrichmentSummary({ ...state, channels: state.channels.map((channel) => refreshedIds.has(channel.id) && !skippedIds.has(channel.id) ? { ...channel, lastPublishedAt: latestByChannel.get(channel.id) ?? channel.lastPublishedAt, enrichment: { ...channel.enrichment, status: 'ready', priority: false, retryCount: channel.enrichment?.retryCount ?? 0, lastSuccessAt: refreshedAt, error: undefined, nextRetryAt: undefined } } : channel) });
       state = { ...state, videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS), settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
       const saved = await writeState(state);
-      return { ok: true, state: saved, data: { videoCount: videos.length, skippedChannels } };
+      return { ok: true, state: saved, data: { videoCount: videos.length, skippedChannels, source, quotaFallback: useQuotaFreeRecentFeed && (quotaBlocked(state) || Boolean(quotaExceeded)) } };
     }
 
     if (message.type === 'UNSUBSCRIBE_CHANNELS') {
@@ -264,11 +335,25 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
     }
 
     if (message.type === 'FETCH_SUGGESTIONS') {
-      const watched = Object.entries(state.videoStates).filter(([, value]) => value.watchedAt).sort((a, b) => Date.parse(b[1].watchedAt!) - Date.parse(a[1].watchedAt!));
-      const recentVideo = watched.length ? state.videos.find((video) => video.id === watched[0]![0]) : undefined;
-      const inferred = state.groups.slice().sort((a, b) => b.channelIds.length - a.channelIds.length)[0]?.name ?? recentVideo?.channelTitle ?? 'technology';
-      const query = message.payload.query?.trim() || inferred;
-      return { ok: true, state, data: { query, videos: await fetchSuggestedVideos(await requireAccessToken(), query) } };
+      const requestedQuery = message.payload.query?.trim() ?? '';
+      const cached = state.preferenceSignals?.suggestions;
+      const cacheFresh = cached && Date.now() - Date.parse(cached.generatedAt) < 6 * 60 * 60_000 && (!requestedQuery || requestedQuery.toLocaleLowerCase() === cached.query.toLocaleLowerCase());
+      if (cacheFresh || (quotaBlocked(state) && cached)) return { ok: true, state, data: { ...cached, cached: true, quotaFallback: quotaBlocked(state) } };
+      if (quotaBlocked(state)) throw new Error('YouTube API đã hết quota hôm nay và chưa có gợi ý cache. Feed subscriptions vẫn tiếp tục cập nhật bằng RSS.');
+      const likedFresh = state.preferenceSignals?.likedUpdatedAt && Date.now() - Date.parse(state.preferenceSignals.likedUpdatedAt) < 24 * 60 * 60_000;
+      let result: Awaited<ReturnType<typeof fetchPersonalizedSuggestions>>;
+      try { result = await fetchPersonalizedSuggestions(await requireAccessToken(), state.preferenceSignals?.watchLater ?? [], requestedQuery, likedFresh ? state.preferenceSignals?.liked : undefined); }
+      catch (error) {
+        if (!isYouTubeQuotaExceeded(error)) throw error;
+        state = await writeState(withQuotaStatus(state, true));
+        if (cached) return { ok: true, state, data: { ...cached, cached: true, quotaFallback: true } };
+        throw error;
+      }
+      const generatedAt = nowIso();
+      const suggestions = { query: result.query, videos: result.videos, likedCount: result.likedCount, watchLaterCount: result.watchLaterCount, generatedAt };
+      state = { ...state, preferenceSignals: { watchLater: state.preferenceSignals?.watchLater ?? [], liked: result.liked, watchLaterUpdatedAt: state.preferenceSignals?.watchLaterUpdatedAt, likedUpdatedAt: likedFresh ? state.preferenceSignals?.likedUpdatedAt : generatedAt, suggestions } };
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: suggestions };
     }
 
     if (message.type === 'AI_UNSUBSCRIBE_SUGGESTIONS') {
@@ -399,15 +484,27 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
 
     let newVideoCount: number | undefined;
     if (message.type === 'DISCOVER') {
-      if ((await getAuthStatus()).connected) return { ok: true, state };
+      const validVideos = message.payload.videos.filter(isValidCachedVideo);
+      const validChannelIds = new Set(validVideos.map((video) => video.channelId));
+      const validChannels = message.payload.channels.filter((channel) => validChannelIds.has(channel.id));
+      if (message.payload.preferenceSource) {
+        const current = state.preferenceSignals ?? { watchLater: [], liked: [] };
+        const key = message.payload.preferenceSource === 'watch-later' ? 'watchLater' : 'liked';
+        const updatedAtKey = message.payload.preferenceSource === 'watch-later' ? 'watchLaterUpdatedAt' : 'likedUpdatedAt';
+        state = { ...state, preferenceSignals: { ...current, [key]: mergeDiscoveredVideos(current[key], validVideos.filter((video) => video.contentType !== 'short')).slice(-200), [updatedAtKey]: nowIso() } };
+      }
+      if ((await getAuthStatus()).connected) {
+        const saved = await writeState(state);
+        return { ok: true, state: saved };
+      }
       const wasInitialized = state.settings.initialDiscoveryComplete;
       const known = new Set(state.videos.map((video) => video.id));
-      const fresh = message.payload.videos.filter((video) => !known.has(video.id));
+      const fresh = validVideos.filter((video) => !known.has(video.id));
       newVideoCount = fresh.length;
       state = {
         ...state,
-        channels: mergeDiscoveredChannels(state.channels, message.payload.channels),
-        videos: mergeDiscoveredVideos(state.videos, message.payload.videos)
+        channels: mergeDiscoveredChannels(state.channels, validChannels),
+        videos: mergeDiscoveredVideos(state.videos, validVideos)
           .sort((a, b) => Date.parse(b.discoveredAt) - Date.parse(a.discoveredAt))
           .slice(0, MAX_CACHED_VIDEOS),
         settings: { ...state.settings, initialDiscoveryComplete: true }
@@ -503,10 +600,17 @@ export default defineBackground(() => {
       const channels = ((claimed.data as { channels?: Channel[] } | undefined)?.channels ?? []);
       if (!channels.length) { await scheduleNextEnrichment(claimed.state); return; }
       try {
-        const result = await fetchUploadFeed(await requireAccessToken(), channels, 1);
-        const applied = await enqueueMessage({ type: 'APPLY_ENRICHMENT_BATCH', payload: { channelIds: channels.map((channel) => channel.id), videos: result.videos, skippedChannelIds: result.skippedChannels.map((channel) => channel.channelId) } }, true);
+        const current = await readState();
+        const result = await fetchRecentUploadFeed(await requireAccessToken(), channels, 1, !quotaBlocked(current) && (normalizeQuotaWindow(current).settings.youtubeQuotaEstimatedUsed ?? 0) < 8_000);
+        const applied = await enqueueMessage({ type: 'APPLY_ENRICHMENT_BATCH', payload: { channelIds: channels.map((channel) => channel.id), videos: result.videos, skippedChannelIds: [], quotaExceeded: result.quotaExceeded, apiRequests: result.apiRequests } }, true);
         await scheduleNextEnrichment(applied.state);
       } catch (error) {
+        if (isYouTubeQuotaExceeded(error)) {
+          const current = await readState();
+          const blocked = await writeState(withQuotaStatus(current, true));
+          await scheduleNextEnrichment(blocked);
+          return;
+        }
         const failed = await enqueueMessage({ type: 'FAIL_ENRICHMENT_BATCH', payload: { channelIds: channels.map((channel) => channel.id), error: error instanceof Error ? error.message : 'Background enrichment thất bại.' } }, true);
         await scheduleNextEnrichment(failed.state);
       }

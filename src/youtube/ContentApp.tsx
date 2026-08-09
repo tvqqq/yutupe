@@ -33,6 +33,22 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
     window.addEventListener('yt-navigate-finish', measure);
     return () => { observer.disconnect(); window.removeEventListener('yt-navigate-finish', measure); };
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePage();
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [open]);
+
   const closePage = () => {
     if (location.hash !== EXTENSION_ROUTE_HASH) return setOpen(false);
     if (openedByExtension.current) { openedByExtension.current = false; history.back(); }

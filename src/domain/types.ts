@@ -89,6 +89,13 @@ export interface Settings {
   enrichmentStatus?: 'idle' | 'running' | 'complete';
   lastEnrichmentAt?: string;
   enrichmentErrorCount?: number;
+  youtubeQuotaBlockedUntil?: string;
+  youtubeQuotaLastErrorAt?: string;
+  youtubeQuotaDate?: string;
+  youtubeQuotaEstimatedUsed?: number;
+  cacheSanitizerVersion?: number;
+  blocklistKeywords?: string[];
+  blocklistChannels?: string[];
 }
 
 export interface AuthStatus {
@@ -103,6 +110,19 @@ export interface AppState {
   channels: Channel[];
   videos: Video[];
   videoStates: Record<string, VideoState>;
+  preferenceSignals?: {
+    watchLater: Video[];
+    liked: Video[];
+    watchLaterUpdatedAt?: string;
+    likedUpdatedAt?: string;
+    suggestions?: {
+      query: string;
+      videos: Video[];
+      likedCount: number;
+      watchLaterCount: number;
+      generatedAt: string;
+    };
+  };
   settings: Settings;
   updatedAt: string;
 }
@@ -121,6 +141,7 @@ export interface FeedFilter {
 export interface DiscoveredPayload {
   channels: Channel[];
   videos: Video[];
+  preferenceSource?: 'watch-later' | 'liked';
 }
 
 export interface CloudVideoEvent {

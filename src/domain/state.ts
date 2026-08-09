@@ -35,7 +35,9 @@ export function createInitialState(): AppState {
       youtubeSyncChannelLimit: 25,
       enrichmentStatus: 'idle',
       enrichmentCursor: 0,
-      enrichmentTotal: 0
+      enrichmentTotal: 0,
+      blocklistKeywords: [],
+      blocklistChannels: []
     },
     updatedAt: now
   };
@@ -53,7 +55,13 @@ export function normalizeImportedState(value: unknown): AppState {
     channels: Array.isArray(candidate.channels) ? candidate.channels : [],
     videos: Array.isArray(candidate.videos) ? candidate.videos.slice(0, MAX_CACHED_VIDEOS) : [],
     videoStates: candidate.videoStates && typeof candidate.videoStates === 'object' ? candidate.videoStates : {},
-    settings: { ...base.settings, ...(candidate.settings ?? {}), cloudApiBaseUrl: candidate.settings?.cloudApiBaseUrl?.trim() || PRODUCTION_CLOUD_API_BASE_URL },
+    settings: {
+      ...base.settings,
+      ...(candidate.settings ?? {}),
+      blocklistKeywords: Array.isArray(candidate.settings?.blocklistKeywords) ? candidate.settings.blocklistKeywords : [],
+      blocklistChannels: Array.isArray(candidate.settings?.blocklistChannels) ? candidate.settings.blocklistChannels : [],
+      cloudApiBaseUrl: candidate.settings?.cloudApiBaseUrl?.trim() || PRODUCTION_CLOUD_API_BASE_URL
+    },
     updatedAt: nowIso()
   };
 }
@@ -122,6 +130,47 @@ export function mergeDiscoveredVideos(items: Video[], discovered: Video[]): Vide
   return [...map.values()];
 }
 
+export function isValidCachedVideo(video: Video): boolean {
+  const title = video.title?.trim();
+  const channelTitle = video.channelTitle?.trim();
+  if (!title || !channelTitle) return false;
+  if (/^(untitled video|unknown|n\/a)$/iu.test(title) || /^(unknown channel|unknown|n\/a)$/iu.test(channelTitle)) return false;
+  if (/^\d{1,3}:\d{2}(?::\d{2})?$/u.test(title)) return false;
+  if (!/^[\w-]{6,20}$/u.test(video.id)) return false;
+  try {
+    const url = new URL(video.url);
+    const urlId = url.searchParams.get('v') ?? (url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : undefined);
+    return url.hostname.endsWith('youtube.com') && urlId === video.id;
+  } catch { return false; }
+}
+
+export function sanitizeVideoCache(state: AppState): AppState {
+  const canonicalChannelIds = new Set(state.channels.filter((channel) => channel.id.startsWith('UC')).map((channel) => channel.id));
+  const videos = state.videos.filter((video) => isValidCachedVideo(video) && (!canonicalChannelIds.size || canonicalChannelIds.has(video.channelId)));
+  const keepChannelIds = canonicalChannelIds.size ? canonicalChannelIds : new Set(videos.map((video) => video.channelId));
+  const channels = state.channels.filter((channel) => keepChannelIds.has(channel.id));
+  const watchLater = state.preferenceSignals?.watchLater.filter(isValidCachedVideo) ?? [];
+  const liked = state.preferenceSignals?.liked.filter(isValidCachedVideo) ?? [];
+  const suggestedVideos = state.preferenceSignals?.suggestions?.videos.filter(isValidCachedVideo) ?? [];
+  const preferencesClean = !state.preferenceSignals || (watchLater.length === state.preferenceSignals.watchLater.length && liked.length === state.preferenceSignals.liked.length && suggestedVideos.length === (state.preferenceSignals.suggestions?.videos.length ?? 0));
+  if (videos.length === state.videos.length && channels.length === state.channels.length && preferencesClean) return state;
+  const channelIds = new Set(channels.map((channel) => channel.id));
+  const videoIds = new Set(videos.map((video) => video.id));
+  return {
+    ...state,
+    videos,
+    channels,
+    groups: state.groups.map((group) => ({ ...group, channelIds: group.channelIds.filter((id) => channelIds.has(id)) })),
+    videoStates: Object.fromEntries(Object.entries(state.videoStates).filter(([videoId]) => videoIds.has(videoId))),
+    preferenceSignals: state.preferenceSignals ? {
+      ...state.preferenceSignals,
+      watchLater,
+      liked,
+      suggestions: state.preferenceSignals.suggestions ? { ...state.preferenceSignals.suggestions, videos: suggestedVideos } : undefined
+    } : undefined
+  };
+}
+
 export function channelsForGroup(state: AppState, groupId: string | null): Set<string> | null {
   if (!groupId) return null;
   const group = state.groups.find((item) => item.id === groupId);
@@ -139,6 +188,9 @@ function matchesDuration(seconds: number | undefined, duration: FeedFilter['dura
 export function selectFeed(state: AppState, filter: FeedFilter): Video[] {
   const channelIds = channelsForGroup(state, filter.groupId);
   const query = filter.query.trim().toLocaleLowerCase();
+  const blockKeywords = (state.settings.blocklistKeywords ?? []).map((k) => k.trim().toLocaleLowerCase()).filter(Boolean);
+  const blockChannels = new Set((state.settings.blocklistChannels ?? []).map((c) => c.trim().toLocaleLowerCase()));
+
   const result = state.videos.filter((video) => {
     const videoState = state.videoStates[video.id];
     const watched = Boolean(videoState?.watchedAt);
@@ -149,6 +201,14 @@ export function selectFeed(state: AppState, filter: FeedFilter): Video[] {
     if (filter.watched === 'watched' && !watched) return false;
     if (filter.watched === 'unwatched' && watched) return false;
     if (state.settings.hideWatched && watched && filter.watched !== 'watched') return false;
+
+    // Blocklist checks
+    if (blockChannels.has(video.channelId.toLocaleLowerCase()) || blockChannels.has(video.channelTitle.toLocaleLowerCase())) return false;
+    if (blockKeywords.length) {
+      const fullText = `${video.title} ${video.channelTitle}`.toLocaleLowerCase();
+      if (blockKeywords.some((keyword) => fullText.includes(keyword))) return false;
+    }
+
     if (query && !`${video.title} ${video.channelTitle}`.toLocaleLowerCase().includes(query)) return false;
     return true;
   });

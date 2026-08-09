@@ -118,3 +118,42 @@ select, .field { min-height: 38px; border: 1px solid var(--line); background: va
 @media (max-width: 1250px) { .video-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (max-width: 980px) { .video-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .video-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.feed-hero { align-items: flex-start; } }
+
+/* Blocklist & Dead Channels UI */
+.blocklist-section, .dead-channels-panel {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.blocklist-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.blocklist-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text);
+}
+.blocklist-pill button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  display: flex;
+}
+.blocklist-pill button:hover {
+  color: var(--danger);
+}

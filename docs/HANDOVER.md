@@ -11,6 +11,8 @@
 | Progressive channel enrichment | Done; fetch chạy ngoài UI mutation queue, commit theo batch 10, trạng thái/retry lưu per-channel |
 | Canonical channel migration | Done cho exact custom URL/handle aliases |
 | YouTube API feed | Done; uploads playlist + video details; cache được bổ sung dần sau sync nhanh |
+| Personalization Lab | Done; Likes API + Watch Later DOM signals, loại Shorts, kết quả dùng section/card giống Feed |
+| YouTube quota optimization | Done; recent/latest qua channel RSS, `videos.list` batch 50, deep history chỉ khi user yêu cầu, quota circuit breaker + suggestion cache |
 | Group feed priority | Done; sắp xếp bằng nút lên/xuống, Feed navbar đọc `Group.position` |
 | Bulk unsubscribe thật | Done; preview, confirmation, sequential calls, per-item failure result |
 | Drive appData push/pull | Done; manual snapshot sync |
@@ -57,6 +59,13 @@
 - WebSub chỉ chạy end-to-end sau khi Worker/D1 được deploy lên HTTPS và secret đã cấu hình.
 - `storage.local` vẫn ghi whole-state và video cache capped ở 8.000.
 - DOM selector YouTube có thể thay đổi; sửa tập trung tại `src/youtube/parser.ts`.
+- Content script catches fire-and-forget messaging failures, removes its DOM listeners/timers on WXT context invalidation, then reloads the YouTube tab once so Chrome injects the new extension build. Không bỏ auto-reload này nếu chưa có cơ chế reconnect tương đương; extension context cũ không thể gọi background mới.
+- Latest-video enrichment và refresh thường dùng `feeds/videos.xml?channel_id=...` (không tính YouTube Data API quota). Metadata duration/views/live được hydrate bằng một `videos.list` cho tối đa 50 IDs; khi gặp `quotaExceeded`, circuit breaker lưu `youtubeQuotaBlockedUntil` đến nửa đêm Pacific và RSS tiếp tục chạy mà không thử metadata.
+- `playlistItems.list` chỉ còn dùng cho lịch sử sâu khi user bấm Load thêm (>25/channel). Video metadata đã cache không bị gọi lại. Với khoảng 971 channels, một vòng latest enrichment giảm từ khoảng 971 `playlistItems.list` + ~20 `videos.list` xuống khoảng 20 `videos.list`.
+- Personalization cache kết quả 6 giờ và Likes 24 giờ. Không tự gọi lại API mỗi lần user chuyển tab Gợi ý; khi quota cạn sẽ trả cache gần nhất.
+- Cache sanitizer v2 chạy một lần khi đọc state sau upgrade: loại `Untitled video`, `Unknown channel`, title chỉ là duration, URL/video ID sai và mọi DOM recommendation không thuộc canonical `UC...` subscriptions khi API channels đã tồn tại. Parser chỉ nhận semantic title links (`#video-title-link`, `#video-title`, heading links), không còn fallback sang thumbnail watch anchors. Nhánh OAuth quota fallback vẫn dùng state đã sanitize.
+- YouTube Data API không cho đọc playlist Watch Later. Extension lấy Likes bằng `videos.list?myRating=like`, còn Watch Later được thu thập từ DOM khi user mở/scroll `youtube.com/playlist?list=WL`. UI Gợi ý hiển thị riêng số signal đã thu thập và link mở playlist khi chưa có dữ liệu.
+- Search gợi ý không dùng deprecated `relatedToVideoId`; query được suy ra từ token có trọng số (Likes x2, Watch Later x1), sau đó lọc video seed. Data API không có cờ `isShort`, nên luồng này dùng heuristic long-form `> 180s` để không lọt Shorts dài tới 3 phút.
 
 ## Verification hiện tại
 

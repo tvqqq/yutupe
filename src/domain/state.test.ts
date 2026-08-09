@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, ENRICHMENT_MAX_RETRIES, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, queueChannelsForEnrichment, retainOnlyChannelIds, selectFeed, upsertById, withEnrichmentSummary } from './state';
+import { createInitialState, ENRICHMENT_MAX_RETRIES, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, queueChannelsForEnrichment, retainOnlyChannelIds, sanitizeVideoCache, selectFeed, upsertById, withEnrichmentSummary } from './state';
 import type { AppState, FeedFilter, Video } from './types';
 
 const videos: Video[] = [
@@ -56,6 +56,28 @@ describe('state helpers', () => {
     expect(result.channels.map((item) => item.id)).toEqual(['c1']);
     expect(result.videos.some((item) => item.channelId === 'mock')).toBe(false);
     expect(result.groups[0]?.channelIds).toEqual(['c1']);
+  });
+
+  it('purges polluted DOM placeholders while preserving canonical API videos', () => {
+    const canonicalId = 'UC1234567890';
+    const current = {
+      ...createInitialState(),
+      channels: [
+        { id: canonicalId, title: 'Subscribed', url: 'https://youtube.com/channel/UC1234567890', lastSeenAt: '', status: 'active' as const, tags: [] },
+        { id: 'channel:/@unknown', title: 'Unknown channel', url: 'https://youtube.com/results', lastSeenAt: '', status: 'active' as const, tags: [] }
+      ],
+      videos: [
+        { id: 'abcdefghijk', title: 'Real upload', url: 'https://youtube.com/watch?v=abcdefghijk', channelId: canonicalId, channelTitle: 'Subscribed', contentType: 'video' as const, discoveredAt: '' },
+        { id: 'zyxwvutsrqp', title: '25:04', url: 'https://youtube.com/watch?v=zyxwvutsrqp', channelId: 'channel:/@unknown', channelTitle: 'Unknown channel', contentType: 'short' as const, discoveredAt: '' }
+      ],
+      videoStates: { zyxwvutsrqp: { watchedAt: '2026-01-01T00:00:00Z' } }
+    };
+
+    const result = sanitizeVideoCache(current);
+
+    expect(result.videos.map((video) => video.id)).toEqual(['abcdefghijk']);
+    expect(result.channels.map((channel) => channel.id)).toEqual([canonicalId]);
+    expect(result.videoStates).toEqual({});
   });
 
   it('queues only missing or stale channel enrichment and prioritizes a selected group', () => {

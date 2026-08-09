@@ -35,7 +35,7 @@ export type AppMessage =
   | { type: 'TOGGLE_PANEL' }
   | { type: 'ENRICH_CHANNEL_BATCH' }
   | { type: 'CLAIM_ENRICHMENT_BATCH' }
-  | { type: 'APPLY_ENRICHMENT_BATCH'; payload: { channelIds: string[]; videos: Video[]; skippedChannelIds: string[] } }
+  | { type: 'APPLY_ENRICHMENT_BATCH'; payload: { channelIds: string[]; videos: Video[]; skippedChannelIds: string[]; quotaExceeded?: boolean; apiRequests?: number } }
   | { type: 'FAIL_ENRICHMENT_BATCH'; payload: { channelIds: string[]; error: string } };
 
 export interface AppResponse {

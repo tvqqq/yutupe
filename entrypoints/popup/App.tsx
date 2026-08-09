@@ -1,6 +1,7 @@
-import { Bell, Check, CircleAlert, Download, FolderKanban, GripVertical, LayoutGrid, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
+import { Bell, Check, CircleAlert, Download, ExternalLink, FolderKanban, GripVertical, LayoutGrid, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
+import { groupFeedSections } from '@/src/domain/feed-sections';
 import { groupChannelCount } from '@/src/domain/state';
 import type { AppState, AuthStatus, Channel, Group, Video } from '@/src/domain/types';
 import { EmptyState, FeedView, GroupIcon, VideoCard } from '@/src/ui/common';
@@ -28,6 +29,7 @@ function SuggestionsPage({ state, act }: { state: AppState; act: (message: AppMe
   const [query, setQuery] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [videos, setVideos] = useState<Video[]>([]);
+  const [sourceCounts, setSourceCounts] = useState({ liked: 0, watchLater: 0 });
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState('');
@@ -35,12 +37,12 @@ function SuggestionsPage({ state, act }: { state: AppState; act: (message: AppMe
   const load = (value?: string) => {
     setBusy(true);
     void act({ type: 'FETCH_SUGGESTIONS', payload: { query: value?.trim() || undefined } }).then((response) => {
-      const data = (response as AppResponse).data as { query: string; videos: Video[] };
-      setActiveQuery(data.query); setVideos(data.videos);
+      const data = (response as AppResponse).data as { query: string; videos: Video[]; likedCount: number; watchLaterCount: number };
+      setActiveQuery(data.query); setVideos(data.videos); setSourceCounts({ liked: data.likedCount, watchLater: data.watchLaterCount });
     }).catch((error) => alert(error instanceof Error ? error.message : 'Không thể tải video gợi ý')).finally(() => setBusy(false));
   };
   useEffect(() => { load(); }, []);
-  const topics = state.groups.slice().sort((a, b) => b.channelIds.length - a.channelIds.length).slice(0, 8).map((group) => group.name);
+  const sections = useMemo(() => groupFeedSections(videos), [videos]);
   const rejectedVideos = state.videos.filter((video) => state.videoStates[video.id]?.hiddenAt).sort((a, b) => Date.parse(state.videoStates[b.id]?.hiddenAt ?? '') - Date.parse(state.videoStates[a.id]?.hiddenAt ?? ''));
   const rejectionStats = state.channels.map((channel) => { const cached = state.videos.filter((video) => video.channelId === channel.id); return { channel, cachedCount: cached.length, rejectedCount: cached.filter((video) => state.videoStates[video.id]?.hiddenAt).length }; }).filter((item) => item.rejectedCount >= 2).sort((a, b) => b.rejectedCount - a.rejectedCount);
   const analyze = async () => {
@@ -50,10 +52,16 @@ function SuggestionsPage({ state, act }: { state: AppState; act: (message: AppMe
     finally { setAiBusy(false); }
   };
   return <section className="page suggestions-page">
-    <div className="suggestions-hero"><div><span><Sparkles size={14} /> PERSONALIZATION LAB</span><h1>Gợi ý</h1><p>Khám phá nội dung mới và quản lý những tín hiệu “Không xem” mà bạn đã gửi.</p></div><div><strong>{rejectedVideos.length}</strong><small>negative signals</small></div></div>
+    <div className="suggestions-hero"><div><span><Sparkles size={14} /> PERSONALIZATION LAB</span><h1>Gợi ý</h1><p>Video dài phù hợp với sở thích từ Likes và Watch Later. YouTube Shorts luôn được loại bỏ.</p></div><div><strong>{videos.length}</strong><small>videos ready</small></div></div>
+    <div className="personalization-sources">
+      <div><span className="source-icon">♥</span><span><strong>{sourceCounts.liked} video đã thích</strong><small>Đọc trực tiếp từ tài khoản YouTube</small></span></div>
+      <div><span className="source-icon">＋</span><span><strong>{sourceCounts.watchLater} video Watch Later</strong><small>{sourceCounts.watchLater ? 'Đã thu thập từ playlist trên YouTube' : 'Mở playlist để extension thu thập tín hiệu'}</small></span>{!sourceCounts.watchLater && <a href="https://www.youtube.com/playlist?list=WL" target="_blank" rel="noreferrer">Mở Watch Later <ExternalLink size={13} /></a>}</div>
+    </div>
+    <form className="suggest-search" onSubmit={(event) => { event.preventDefault(); load(query); }}><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nhập chủ đề để ưu tiên (không bắt buộc)" /><button className="primary" disabled={busy}>{busy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{busy ? 'Đang phân tích…' : 'Tạo gợi ý'}</button></form>
+    <div className="feed-heading"><span>Chủ đề suy ra: <strong>{activeQuery || 'đang phân tích…'}</strong></span><span>{videos.length} video dài</span></div>
+    {!videos.length ? <EmptyState title={busy ? 'Đang phân tích Likes và Watch Later…' : 'Chưa có gợi ý'} detail="Hãy Like một vài video hoặc mở playlist Watch Later, sau đó tạo lại gợi ý." /> : <div className="feed-sections personalization-feed">{sections.map((section) => <section className="feed-section" key={section.id}><header><div><h2>{section.title}</h2><p>{section.detail}</p></div><span>{section.videos.length}</span></header><div className="video-grid">{section.videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div></section>)}</div>}
     <section className="feedback-panel"><header><div><span className="feedback-icon"><Sparkles size={18} /></span><div><h2>AI unsubscribe advisor</h2><p>AI phân tích các channel có nhiều video bị đánh dấu Không xem. Extension không tự unsubscribe.</p></div></div><button className="secondary" disabled={aiBusy || !rejectionStats.length} onClick={() => void analyze()}>{aiBusy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{aiBusy ? 'Đang phân tích…' : 'Phân tích bằng AI'}</button></header>{aiError && <p className="integration-notice">{aiError}</p>}{!rejectionStats.length ? <p className="feedback-empty">Cần ít nhất 2 video “Không xem” từ cùng một channel để bắt đầu phân tích.</p> : <div className="unsubscribe-grid">{rejectionStats.map(({ channel, rejectedCount, cachedCount }) => { const result = recommendations.find((item) => item.channelId === channel.id); return <article key={channel.id}><div className="unsubscribe-channel">{channel.thumbnailUrl ? <img src={channel.thumbnailUrl} alt="" /> : <span>{channel.title[0]}</span>}<div><strong>{channel.title}</strong><small>{rejectedCount}/{cachedCount} video đã chọn Không xem</small></div></div>{result ? <p>{result.reason}<span>{Math.round(result.confidence * 100)}% confidence</span></p> : <p className="muted-copy">Chờ AI đánh giá mức độ phù hợp.</p>}<button className="danger-button small" disabled={!result || !channel.subscriptionId} onClick={() => confirm(`UNSUBSCRIBE thật channel “${channel.title}” trên YouTube?`) && void act({ type: 'UNSUBSCRIBE_CHANNELS', payload: { channelIds: [channel.id] } }).catch((error) => alert(error instanceof Error ? error.message : 'Unsubscribe thất bại'))}><Trash2 size={14} />Unsubscribe</button></article>; })}</div>}</section>
     <section className="rejected-panel"><div className="feed-heading"><span><strong>Đã chọn Không xem</strong> · dùng làm tín hiệu cá nhân hóa</span><span>{rejectedVideos.length} video</span></div>{rejectedVideos.length ? <div className="rejected-video-list">{rejectedVideos.slice(0, 30).map((video) => <article key={video.id}>{video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span /> }<div><strong>{video.title}</strong><small>{video.channelTitle}</small></div><button className="secondary small" onClick={() => void act({ type: 'HIDE_VIDEO', payload: { videoId: video.id, hidden: false } })}>Hoàn tác</button></article>)}</div> : <EmptyState title="Chưa có negative feedback" detail="Bấm “Không xem” trên video ở Feed để lưu tín hiệu tại đây." />}</section>
-    <div className="section-title"><div><h1>Trending dành cho bạn</h1><p>Video phổ biến gần đây dựa trên groups, lịch sử xem local hoặc chủ đề bạn nhập.</p></div></div><form className="suggest-search" onSubmit={(event) => { event.preventDefault(); load(query); }}><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Bạn muốn xem nội dung gì?" /><button className="primary" disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm video trending'}</button></form>{topics.length > 0 && <div className="suggest-topics">{topics.map((topic) => <button className="chip" key={topic} onClick={() => { setQuery(topic); load(topic); }}>{topic}</button>)}</div>}<div className="feed-heading"><span>Chủ đề: <strong>{activeQuery || 'đang phân tích…'}</strong></span><span>{videos.length} video</span></div>{!videos.length ? <EmptyState title={busy ? 'Đang tìm video phù hợp…' : 'Chưa có gợi ý'} detail="Nhập một chủ đề hoặc tạo Groups để cá nhân hoá kết quả." /> : <div className="video-grid">{videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div>}
   </section>;
 }
 
@@ -160,6 +168,70 @@ function ChannelRow({ channel, state, act, selected, onSelect }: { channel: Chan
   </article>;
 }
 
+import { detectDeadChannels } from '@/src/domain/dead-channels';
+
+function DeadChannelsPanel({ state }: { state: AppState; act?: (message: AppMessage) => Promise<unknown> }) {
+  const [open, setOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(20);
+  const deadChannels = useMemo(() => detectDeadChannels(state.channels, state.videos), [state.channels, state.videos]);
+
+  if (!deadChannels.length) return null;
+
+  const displayedChannels = deadChannels.slice(0, visibleCount);
+  const remainingCount = Math.max(0, deadChannels.length - visibleCount);
+
+  return (
+    <div className="dead-channels-panel">
+      <div className="section-title">
+        <div>
+          <h3><Sparkles size={16} /> Kênh không hoạt động / không khả dụng ({deadChannels.length})</h3>
+          <p>Phát hiện các kênh đã lâu không ra video hoặc playlist bị ngưng.</p>
+        </div>
+        <button className="secondary small" onClick={() => setOpen(!open)}>
+          {open ? 'Thu gọn' : 'Xem chi tiết'}
+        </button>
+      </div>
+      {open && (
+        <>
+          <div className="unsubscribe-grid" style={{ marginTop: 10 }}>
+            {displayedChannels.map(({ channel, reason, latestVideoTitle }) => (
+              <article key={channel.id}>
+                <div className="unsubscribe-channel">
+                  {channel.thumbnailUrl ? <img src={channel.thumbnailUrl} alt="" /> : <span>{channel.title[0]}</span>}
+                  <div>
+                    <strong>{channel.title}</strong>
+                    <small>{reason}</small>
+                  </div>
+                </div>
+                {latestVideoTitle && <p className="muted-copy">Video cuối: {latestVideoTitle}</p>}
+                <a
+                  href={channel.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="secondary small"
+                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                >
+                  <ExternalLink size={14} /> Xem kênh trên YouTube
+                </a>
+              </article>
+            ))}
+          </div>
+          {remainingCount > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+              <button
+                className="secondary small"
+                onClick={() => setVisibleCount((prev) => prev + 30)}
+              >
+                Hiển thị thêm {Math.min(30, remainingCount)} kênh (còn lại {remainingCount})
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'subscribers' | 'az' | 'recent' | 'latest-video'>('subscribers');
@@ -170,6 +242,7 @@ function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessa
   const enrichmentCursor = Math.min(state.settings.enrichmentCursor ?? 0, enrichmentTotal);
   const enrichmentPercent = enrichmentTotal ? Math.round(enrichmentCursor / enrichmentTotal * 100) : 100;
   const enrichmentErrors = state.settings.enrichmentErrorCount ?? 0;
+  const quotaBlockedUntil = state.settings.youtubeQuotaBlockedUntil && Date.parse(state.settings.youtubeQuotaBlockedUntil) > Date.now() ? state.settings.youtubeQuotaBlockedUntil : undefined;
   const channels = useMemo(() => state.channels.filter((channel) => channel.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => sort === 'subscribers' ? (b.subscriberCount ?? -1) - (a.subscriberCount ?? -1) || a.title.localeCompare(b.title) : sort === 'az' ? a.title.localeCompare(b.title) : sort === 'latest-video' ? Date.parse(b.lastPublishedAt ?? '1970-01-01') - Date.parse(a.lastPublishedAt ?? '1970-01-01') : Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)), [state.channels, query, sort]);
   const runAction = async (key: string, message: AppMessage, success: string) => {
     setBusy(key); setActionNotice(null);
@@ -182,8 +255,10 @@ function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessa
     <div className="channel-sync-guide"><div><strong>1 · Cập nhật subscriptions</strong><span>Dùng khi vừa subscribe/unsubscribe trên YouTube. Danh sách channel hiện ra trước, metadata bổ sung chạy nền.</span></div><div><strong>2 · Cập nhật Feed</strong><span>Dùng để lấy video mới của các channel đã có. Không tải lại danh sách subscriptions.</span></div></div>
     {busy && <div className="channel-action-loading" role="status"><RefreshCw className="spin" size={17} /><span><strong>{busy === 'sync' ? 'Đang đọc subscriptions từ YouTube…' : busy === 'feed' ? 'Đang tải video mới từ uploads playlists…' : busy === 'ai' ? 'AI đang phân loại channels…' : 'Đang xử lý yêu cầu…'}</strong><small>Tác vụ có thể mất một lúc với tài khoản có nhiều channel. Bạn có thể tiếp tục xem trạng thái tại đây.</small></span></div>}
     {actionNotice && <div className={`channel-action-notice ${actionNotice.type}`}><span>{actionNotice.text}</span><button className="ghost small" onClick={() => setActionNotice(null)}><X size={14} /></button></div>}
+    {quotaBlockedUntil && <div className="enrichment-warning"><span className="enrichment-warning-icon"><CircleAlert size={18} /></span><div><strong>YouTube Data API đã hết quota</strong><small>Video mới vẫn cập nhật bằng RSS không tốn quota. Metadata chi tiết và lịch sử sâu sẽ tiếp tục sau {new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(quotaBlockedUntil))}.</small></div></div>}
     {state.settings.enrichmentStatus === 'running' && <div className="enrichment-progress"><div className="enrichment-copy"><RefreshCw className="spin" size={16} /><span><strong>Subscriptions đã sẵn sàng — Groups dùng được ngay</strong><small>Video mới nhất đang được bổ sung theo độ ưu tiên: {enrichmentCursor}/{enrichmentTotal} channels{enrichmentErrors ? ` · ${enrichmentErrors} đang retry` : ''}</small></span></div><div className="enrichment-bar"><span style={{ width: `${enrichmentPercent}%` }} /></div></div>}
     {state.settings.enrichmentStatus === 'complete' && enrichmentErrors > 0 && <div className="enrichment-warning"><span className="enrichment-warning-icon"><CircleAlert size={18} /></span><div><strong>Một số channel chưa cập nhật được metadata</strong><small>Feed và Groups vẫn dùng bình thường. Extension sẽ thử lại ở lần cập nhật subscriptions tiếp theo.</small></div><div className="enrichment-error-count"><strong>{enrichmentErrors}</strong><span>channel lỗi</span></div></div>}
+    <DeadChannelsPanel state={state} act={act} />
     <div className="ai-organize"><div><Sparkles size={18} /><span><strong>AI Groups</strong><small>{state.settings.cloudApiBaseUrl ? 'Dùng AI cloud để tạo và phân loại groups.' : 'Chưa có Cloud API: dùng Smart Groups local, không cần cấu hình thêm.'}</small></span></div><button className="secondary" disabled={Boolean(busy) || !state.channels.length} onClick={() => void runAction('ai', { type: 'AI_ORGANIZE_CHANNELS' }, 'AI đã hoàn tất phân loại groups.')}><Sparkles size={15} />{busy === 'ai' ? 'Đang phân loại…' : state.settings.cloudApiBaseUrl ? 'Tạo groups bằng AI' : 'Tạo Smart Groups'}</button></div>
     <div className="channel-toolbar"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm channel…" /><select value={sort} onChange={(event) => setSort(event.target.value as 'subscribers' | 'az' | 'recent' | 'latest-video')}><option value="subscribers">Nhiều người đăng ký nhất</option><option value="az">A–Z</option><option value="latest-video">Video hoạt động gần đây</option><option value="recent">Phát hiện gần đây</option></select></div>
     {!channels.length ? <EmptyState title="Chưa tìm thấy channel" detail="Kết nối Google rồi bấm Sync YouTube, hoặc cuộn trang YouTube để thu thập local." /> : <div className="channel-list">{channels.map((channel) => <ChannelRow key={channel.id} channel={channel} state={state} act={act} selected={selected.has(channel.id)} onSelect={() => setSelected((current) => { const next = new Set(current); if (next.has(channel.id)) next.delete(channel.id); else next.add(channel.id); return next; })} />)}</div>}
@@ -258,13 +333,27 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud events', { type: 'POLL_CLOUD_EVENTS' })}>Đồng bộ events</button>
     </div>
     {notice && <p className="integration-notice">{notice}</p>}
-    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'} · Cloud poll: {state.settings.lastCloudPollAt ?? 'chưa chạy'}</p>
+    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · API estimate hôm nay: {state.settings.youtubeQuotaEstimatedUsed ?? 0}/8.000 soft limit · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'} · Cloud poll: {state.settings.lastCloudPollAt ?? 'chưa chạy'}</p>
     </>}
   </div>;
 }
 
 function SettingsPage({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [newKeyword, setNewKeyword] = useState('');
+  const keywords = state.settings.blocklistKeywords ?? [];
+
+  const addKeyword = () => {
+    const val = newKeyword.trim();
+    if (!val || keywords.includes(val)) return;
+    void act({ type: 'UPDATE_SETTINGS', payload: { blocklistKeywords: [...keywords, val] } });
+    setNewKeyword('');
+  };
+
+  const removeKeyword = (target: string) => {
+    void act({ type: 'UPDATE_SETTINGS', payload: { blocklistKeywords: keywords.filter((k) => k !== target) } });
+  };
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -276,10 +365,33 @@ function SettingsPage({ state, act }: { state: AppState; act: (message: AppMessa
     try { await act({ type: 'IMPORT_STATE', payload: JSON.parse(await file.text()) }); } catch (error) { alert(error instanceof Error ? error.message : 'Import thất bại'); }
   };
   return <section className="page settings-page">
-    <div className="section-title"><div><h1>Cài đặt</h1><p>Giao diện, watched state, notifications và backup.</p></div></div>
+    <div className="section-title"><div><h1>Cài đặt</h1><p>Giao diện, watched state, blocklist từ khóa và backup.</p></div></div>
     <div className="settings-card"><div><strong>Giao diện</strong><span>Theo hệ thống, sáng hoặc tối.</span></div><select value={state.settings.theme} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { theme: event.target.value as AppState['settings']['theme'] } })}><option value="system">Hệ thống</option><option value="light">Sáng</option><option value="dark">Tối</option></select></div>
     <div className="settings-card"><div><strong>Ẩn video đã xem</strong><span>Video vẫn còn trong backup và bộ lọc “Đã xem”.</span></div><input type="checkbox" checked={state.settings.hideWatched} onChange={() => void act({ type: 'UPDATE_SETTINGS', payload: { hideWatched: !state.settings.hideWatched } })} /></div>
     <div className="settings-card"><div><strong>Thông báo local</strong><span>Chỉ hoạt động khi YouTube đang mở và phát hiện video mới thuộc group bật thông báo.</span></div><input type="checkbox" checked={state.settings.notificationsEnabled} onChange={() => void act({ type: 'UPDATE_SETTINGS', payload: { notificationsEnabled: !state.settings.notificationsEnabled } })} /></div>
+
+    <div className="blocklist-section">
+      <div className="section-title">
+        <div>
+          <h3>Bộ lọc từ khóa (Blocklist)</h3>
+          <p>Tự động ẩn các video có tiêu đề chứa từ khóa bạn chọn (ví dụ: SPOILER, REACTION).</p>
+        </div>
+      </div>
+      <form style={{ display: 'flex', gap: 8 }} onSubmit={(e) => { e.preventDefault(); addKeyword(); }}>
+        <input className="field" style={{ flex: 1 }} value={newKeyword} onChange={(e) => setNewKeyword(e.target.value)} placeholder="Nhập từ khóa muốn ẩn…" />
+        <button type="submit" className="primary small" disabled={!newKeyword.trim()}>Thêm từ khóa</button>
+      </form>
+      <div className="blocklist-pills">
+        {keywords.map((kw) => (
+          <span key={kw} className="blocklist-pill">
+            {kw}
+            <button title="Xóa từ khóa" onClick={() => removeKeyword(kw)}><X size={14} /></button>
+          </span>
+        ))}
+        {!keywords.length && <span className="muted-copy">Chưa có từ khóa nào trong blocklist.</span>}
+      </div>
+    </div>
+
     <div className="settings-card backup-card"><div><strong>Backup dữ liệu</strong><span>Export/import JSON gồm groups, channels và watched state.</span></div><div><button className="secondary" onClick={exportData}><Download size={16} />Export</button><button className="secondary" onClick={() => fileRef.current?.click()}><Upload size={16} />Import</button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event.target.files?.[0])} /></div></div>
     <div className="settings-card danger-zone"><div><strong>Reset extension</strong><span>Xóa toàn bộ dữ liệu local. Không thể hoàn tác nếu chưa export.</span></div><button className="danger-button" onClick={() => confirm('Xóa toàn bộ dữ liệu local?') && void act({ type: 'RESET_STATE' })}><Trash2 size={16} />Reset</button></div>
     <div className="mvp-note"><Sparkles size={18} /><div><strong>Local-first + optional cloud</strong><p>OAuth, YouTube API và Drive chạy trực tiếp với Google. AI/WebSub dùng Cloud API riêng để giữ secret và webhook ngoài extension.</p></div></div>

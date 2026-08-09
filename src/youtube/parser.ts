@@ -52,14 +52,17 @@ export function scanYouTubePage(root: ParentNode = document): DiscoveredPayload 
   const discoveredAt = new Date().toISOString();
 
   for (const card of root.querySelectorAll(CARD_SELECTORS)) {
-    const titleAnchor = card.querySelector<HTMLAnchorElement>('a#video-title-link, a#video-title, a[href*="/watch?v="], a[href^="/shorts/"]');
+    // Thumbnail anchors appear before headings in YouTube's DOM and often only
+    // contain the duration text. Never use a generic watch link as the title.
+    const titleAnchor = card.querySelector<HTMLAnchorElement>('a#video-title-link, a#video-title, h3 a[href*="/watch?v="], h3 a[href^="/shorts/"]');
     if (!titleAnchor?.href) continue;
     const parsed = new URL(titleAnchor.href, location.origin);
     const videoId = parsed.searchParams.get('v') ?? (parsed.pathname.startsWith('/shorts/') ? parsed.pathname.split('/')[2] : undefined);
     if (!videoId) continue;
 
     const channelAnchor = card.querySelector<HTMLAnchorElement>('ytd-channel-name a, #channel-name a, a.yt-simple-endpoint[href^="/@"], a.yt-simple-endpoint[href^="/channel/"]');
-    const channelTitle = channelAnchor?.textContent?.trim() || card.querySelector('#channel-name')?.textContent?.trim() || 'Unknown channel';
+    const channelTitle = channelAnchor?.textContent?.trim() || card.querySelector('#channel-name')?.textContent?.trim();
+    if (!channelTitle) continue;
     const channelUrl = channelAnchor?.href ? absoluteUrl(channelAnchor.href) : `https://www.youtube.com/results?search_query=${encodeURIComponent(channelTitle)}`;
     const channelId = idFromChannelUrl(channelUrl);
     const durationText = card.querySelector<HTMLElement>('ytd-thumbnail-overlay-time-status-renderer, #time-status, .badge-shape-wiz__text')?.textContent ?? '';
@@ -68,7 +71,8 @@ export function scanYouTubePage(root: ParentNode = document): DiscoveredPayload 
     const viewLabel = metadata.find((item) => /view|lượt xem/i.test(item));
     const publishedLabel = metadata.find((item) => item && item !== viewLabel);
     const thumbnailUrl = card.querySelector<HTMLImageElement>('ytd-thumbnail img, img.yt-core-image')?.src || undefined;
-    const title = titleAnchor.getAttribute('title') || titleAnchor.textContent?.trim() || 'Untitled video';
+    const title = titleAnchor.getAttribute('title')?.trim() || titleAnchor.textContent?.trim();
+    if (!title || /^\d{1,3}:\d{2}(?::\d{2})?$/u.test(title)) continue;
 
     channels.set(channelId, {
       id: channelId,

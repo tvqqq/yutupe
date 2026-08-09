@@ -61,35 +61,58 @@ export default defineContentScript({
     });
 
     let timer: number | undefined;
+    let invalidated = false;
+    const sendFromContent = async (message: Parameters<typeof sendMessage>[0]) => {
+      if (invalidated) return;
+      try { await sendMessage(message); }
+      catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (detail.includes('Extension context invalidated')) {
+          invalidated = true;
+          observer.disconnect();
+          if (timer) window.clearTimeout(timer);
+          return;
+        }
+        throw error;
+      }
+    };
     const discover = async () => {
+      if (invalidated) return;
       installSidebarButton();
       syncSidebarButton();
       const payload = scanYouTubePage();
-      if (payload.videos.length) await sendMessage({ type: 'DISCOVER', payload });
+      const listId = new URL(location.href).searchParams.get('list');
+      const preferenceSource = listId === 'WL' ? 'watch-later' : listId === 'LL' ? 'liked' : undefined;
+      if (payload.videos.length) await sendFromContent({ type: 'DISCOVER', payload: { ...payload, preferenceSource } });
     };
     const schedule = () => {
       if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => void discover(), 900);
+      timer = window.setTimeout(() => { void discover().catch((error) => console.warn('[YouTube Collections] Discovery failed', error)); }, 900);
     };
     const observer = new MutationObserver(schedule);
     observer.observe(document.documentElement, { childList: true, subtree: true });
-    ctx.onInvalidated(() => { observer.disconnect(); if (timer) clearTimeout(timer); });
+    ctx.onInvalidated(() => { invalidated = true; observer.disconnect(); if (timer) clearTimeout(timer); });
     schedule();
     window.addEventListener('hashchange', syncSidebarButton);
     window.addEventListener('popstate', syncSidebarButton);
     window.addEventListener('youtube-collections:route-change', syncSidebarButton);
 
-    document.addEventListener('click', (event) => {
+    const trackWatchedClick = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href*="watch?v="], a[href^="/shorts/"]') : null;
       if (!target) return;
       const url = new URL(target.href, location.origin);
       const videoId = url.searchParams.get('v') ?? (url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : undefined);
-      if (videoId) void sendMessage({ type: 'MARK_WATCHED', payload: { videoId, watched: true } });
-    }, true);
+      if (videoId) void sendFromContent({ type: 'MARK_WATCHED', payload: { videoId, watched: true } }).catch((error) => console.warn('[YouTube Collections] Watch tracking failed', error));
+    };
+    document.addEventListener('click', trackWatchedClick, true);
     ctx.onInvalidated(() => {
+      document.removeEventListener('click', trackWatchedClick, true);
       window.removeEventListener('hashchange', syncSidebarButton);
       window.removeEventListener('popstate', syncSidebarButton);
       window.removeEventListener('youtube-collections:route-change', syncSidebarButton);
+      // A reloaded/updated extension cannot reuse the old isolated world. Refreshing
+      // the host page is the only way Chrome can inject the new content script.
+      window.setTimeout(() => location.reload(), 100);
     });
   }
 });

@@ -5,6 +5,7 @@ import { groupFeedSections } from '@/src/domain/feed-sections';
 import { recommendVideos, type VideoRecommendation } from '@/src/domain/recommendations';
 import type { AppState, ContentType, FeedFilter, Group, Video } from '@/src/domain/types';
 import type { AppMessage } from '@/src/domain/messages';
+import { useYutupeHotkeys } from './hotkeys';
 
 export const DEFAULT_FILTER: FeedFilter = {
   groupId: null,
@@ -48,7 +49,7 @@ export function FeedControls({ state, filter, onChange, recommendedOnly = false,
       {state.groups.slice().sort((a, b) => a.position - b.position).map((group) => <button key={group.id} className={filter.groupId === group.id ? 'chip active' : 'chip'} onClick={() => onChange({ ...filter, groupId: group.id, watched: 'unwatched' })}><GroupIcon group={group} size={20} />{group.name}<span className="chip-count">{unreadCount(group.channelIds)}</span></button>)}
     </div>
     <div className="filter-row">
-      <label className="search"><Search size={15} /><input value={filter.query} onChange={(event) => onChange({ ...filter, query: event.target.value })} placeholder="Tìm video hoặc channel…" />{filter.query && <button aria-label="Xóa tìm kiếm" onClick={() => onChange({ ...filter, query: '' })}><X size={14} /></button>}</label>
+      <label className="search"><Search size={15} /><input value={filter.query} onChange={(event) => onChange({ ...filter, query: event.target.value })} placeholder="Tìm video hoặc channel… (Hotkey: /)" />{filter.query && <button aria-label="Xóa tìm kiếm" onClick={() => onChange({ ...filter, query: '' })}><X size={14} /></button>}</label>
       <select aria-label="Độ dài" value={filter.duration} onChange={(event) => onChange({ ...filter, duration: event.target.value as FeedFilter['duration'] })}>
         <option value="any">Mọi độ dài</option><option value="short">Dưới 4 phút</option><option value="medium">4–20 phút</option><option value="long">Trên 20 phút</option>
       </select>
@@ -114,6 +115,14 @@ export function FeedView({ state, act, compact = false }: { state: AppState; act
   const recommendationMap = useMemo(() => new Map(recommendations.map((item) => [item.video.id, item])), [recommendations]);
   const videos = useMemo(() => recommendedOnly ? recommendations.map((item) => item.video) : baseVideos, [recommendedOnly, recommendations, baseVideos]);
   const sections = useMemo(() => groupFeedSections(videos), [videos]);
+
+  useYutupeHotkeys(true, {
+    onFocusSearch: () => {
+      const searchInput = feedRoot.current?.querySelector<HTMLInputElement>('.search input');
+      searchInput?.focus();
+    }
+  });
+
   useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current); }, []);
   const showActionToast = (message: string, undo: AppMessage) => {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -181,12 +190,9 @@ export function FeedView({ state, act, compact = false }: { state: AppState; act
     window.open(`https://www.youtube.com/watch_videos?video_ids=${ids}`, '_blank', 'noopener,noreferrer');
   };
   return <div className="feed-view" ref={feedRoot}>
-    <div className="feed-hero"><div><span><SparklesMark /> PERSONAL VIDEO DECK</span><h1>Feed</h1><p>Feed riêng từ subscriptions, được tổ chức theo collections và tín hiệu xem của bạn.</p></div><div><strong>{videos.length}</strong><small>videos ready</small></div></div>
     <div className="feed-command"><FeedControls state={state} filter={filter} onChange={changeFilter} recommendedOnly={recommendedOnly} recommendedCount={recommendations.length} onRecommendedChange={(value) => { setFilter((current) => ({ ...current, groupId: null })); setRecommendedOnly(value); setVisibleBySection({}); }} compact={compact} /></div>
     <div className="feed-heading"><span><strong>{videos.length}</strong> video {filter.watched === 'unwatched' ? 'chưa xem' : ''}</span><div className="feed-actions"><button className="secondary small" disabled={refreshing} onClick={refreshCurrent}><RefreshCw className={refreshing ? 'spin' : ''} size={15} />{refreshing ? 'Đang tải' : 'Làm mới'}</button><button className="primary small" disabled={!videos.length} onClick={playAll}><Play size={15} />Phát tất cả</button></div></div>
     {!videos.length ? <EmptyState title={refreshing ? 'Đang tải video của group…' : recommendedOnly ? 'Chưa đủ tín hiệu đề xuất' : 'Chưa có video chưa xem'} detail={recommendedOnly ? 'Hãy xem hoặc đánh dấu Không xem một vài video để AI hiểu sở thích của bạn.' : filter.groupId ? 'Extension sẽ tải video mới từ tất cả channel thuộc group này. Bạn cũng có thể chọn “Đã xem: Tất cả” để xem lại.' : 'Bấm “Làm mới” để tải video từ YouTube API.'} /> : <div className="feed-sections">{recommendedOnly && <div className="recommendation-note"><Sparkles size={18} /><div><strong>AI Recommend Watch</strong><span>Xếp hạng từ lịch sử xem, sở thích, độ hot và tốc độ tăng lượt xem trong 30 ngày gần đây.</span></div></div>}{sections.map((section) => { const visibleCount = visibleBySection[section.id] ?? 30; const displayed = section.videos.slice(0, visibleCount); const cachedRemaining = Math.max(0, section.videos.length - displayed.length); return <section className="feed-section" key={section.id}><header><div><h2>{section.title}</h2><p>{section.detail}</p></div><span>{displayed.length}/{section.videos.length}</span></header><div className={compact ? 'video-grid compact' : 'video-grid'}>{displayed.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} recommendation={recommendationMap.get(video.id)} onAction={(message) => performVideoAction(video, message)} />)}</div><div className="section-load-more"><button className="secondary" disabled={refreshing || (!cachedRemaining && perChannel >= 500)} onClick={() => showMoreSection(section.id, section.videos.length)}><RefreshCw className={refreshing && !cachedRemaining ? 'spin' : ''} size={16} />{cachedRemaining ? `Hiển thị thêm ${Math.min(30, cachedRemaining)} video` : refreshing ? 'Đang lấy thêm từ YouTube…' : perChannel >= 500 ? 'Đã tải tối đa trong phạm vi 1 năm' : 'Lấy thêm video từ YouTube'}</button></div></section>; })}</div>}
     {toast && <aside className="action-toast" role="status" aria-live="polite" key={toast.id}><CheckCircle2 size={20} /><span>{toast.message}</span><button onClick={() => { const undo = toast.undo; setToast(null); const videoId = undo.type === 'MARK_WATCHED' || undo.type === 'HIDE_VIDEO' ? undo.payload.videoId : ''; const video = state.videos.find((item) => item.id === videoId); if (video) void performVideoAction(video, undo, false); }}><Undo2 size={15} />Hoàn tác</button><button className="toast-close" aria-label="Đóng thông báo" onClick={() => setToast(null)}><X size={15} /></button></aside>}
   </div>;
 }
-
-function SparklesMark() { return <span aria-hidden="true">✦</span>; }
