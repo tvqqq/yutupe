@@ -19,6 +19,8 @@ Scopes extension yêu cầu:
 ## Stable extension ID
 
 1. Tạo/gán public extension key để unpacked build giữ cùng extension ID.
+
+Chrome production key hiện được lưu local tại `.keys/chrome-extension-private.pem`; public key nằm trong `.env.local`. Hai đường dẫn này bị Git ignore. Extension ID được suy ra cố định là `behfooaigccbooibiabffaehejiagcbi`. Phải backup private key ở nơi an toàn; mất key đồng nghĩa không thể tái tạo cùng ID trên máy khác.
 2. Load build và kiểm tra ID tại `chrome://extensions`.
 3. Tạo OAuth Client type **Chrome Extension** với Item ID này.
 4. Đặt client ID và public key vào environment khi build:

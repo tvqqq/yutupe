@@ -22,7 +22,7 @@
   "vars": {
     "GOOGLE_CLIENT_IDS": "338607738588-qjthn64gvhrlqene5nkv849spn0if2l0.apps.googleusercontent.com",
     "PUBLIC_BASE_URL": "https://youtube-collections-cloud.qeoqeo.workers.dev",
-    "EXTENSION_ORIGINS": "chrome-extension://kcpmhagibfpnjljpfcknkaefgoacmlke",
+    "EXTENSION_ORIGINS": "chrome-extension://behfooaigccbooibiabffaehejiagcbi",
     "OPENAI_MODEL": "gpt-5.6",
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
     "WEBSUB_HUB_URL": "https://pubsubhubbub.appspot.com/subscribe"

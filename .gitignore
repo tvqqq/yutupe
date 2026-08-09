@@ -8,3 +8,4 @@ coverage/
 !.env.example
 cloud/.dev.vars
 cloud/.wrangler/
+.keys/

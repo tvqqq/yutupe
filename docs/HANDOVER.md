@@ -29,6 +29,7 @@
 - Cloud backend nhận ID token nếu có. Với Chrome opaque token, `/v1/auth/google` chỉ được phép verify rồi đổi sang narrow session token; không được lưu hoặc tái sử dụng Google access token.
 - Unsubscribe chỉ chạy sau browser confirmation hiển thị exact channel names.
 - Drive uses `appDataFolder`, không xin quyền đọc toàn bộ My Drive.
+- Chrome stable ID là `behfooaigccbooibiabffaehejiagcbi`, sinh từ public key trong `.env.local`. Private key nằm tại `.keys/chrome-extension-private.pem` (Git ignored, mode 600) và phải được backup ngoài repository.
 
 ## Việc P0 tiếp theo
 
