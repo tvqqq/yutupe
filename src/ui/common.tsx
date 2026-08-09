@@ -86,7 +86,7 @@ export function VideoCard({ video, watched, recommendation, onAction }: { video:
       {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span className="thumb-fallback"><Play /></span>}
       {formatDuration(video.durationSeconds) && <span className="duration">{formatDuration(video.durationSeconds)}</span>}
       {video.contentType !== 'video' && <span className={`content-badge ${video.contentType}`}>{video.contentType}</span>}
-      {recommendation && <span className="ai-recommend-badge" title={recommendation.reasons.join(' · ')}><Sparkles size={12} />AI recommend watch</span>}
+      {recommendation && <span className="ai-recommend-badge" tabIndex={0} aria-label={`AI đề xuất: ${recommendation.reasons.join(' · ')}`} data-tooltip={recommendation.reasons.join(' · ')}><Sparkles size={12} /><span>AI</span></span>}
     </a>
     <div className="video-body">
       <a className="video-title" href={video.url} target="_blank" rel="noreferrer">{video.title}</a>
