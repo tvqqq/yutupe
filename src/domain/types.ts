@@ -1,0 +1,102 @@
+export type ContentType = 'video' | 'short' | 'live' | 'upcoming';
+export type ChannelStatus = 'active' | 'inactive' | 'unavailable' | 'unknown';
+export type ThemeMode = 'system' | 'light' | 'dark';
+
+export interface Group {
+  id: string;
+  name: string;
+  icon: string;
+  iconDataUrl?: string;
+  color: string;
+  channelIds: string[];
+  notifications: boolean;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Channel {
+  id: string;
+  title: string;
+  url: string;
+  thumbnailUrl?: string;
+  subscriberCount?: number;
+  lastSeenAt: string;
+  lastPublishedAt?: string;
+  status: ChannelStatus;
+  tags: string[];
+  subscriptionId?: string;
+  uploadsPlaylistId?: string;
+  description?: string;
+}
+
+export interface Video {
+  id: string;
+  title: string;
+  url: string;
+  thumbnailUrl?: string;
+  channelId: string;
+  channelTitle: string;
+  durationSeconds?: number;
+  publishedAt?: string;
+  publishedLabel?: string;
+  viewCount?: number;
+  contentType: ContentType;
+  discoveredAt: string;
+}
+
+export interface VideoState {
+  watchedAt?: string;
+  hiddenAt?: string;
+}
+
+export interface Settings {
+  theme: ThemeMode;
+  hideWatched: boolean;
+  defaultGroupId: string | null;
+  notificationsEnabled: boolean;
+  initialDiscoveryComplete: boolean;
+  googleClientId: string;
+  cloudApiBaseUrl: string;
+  youtubeSyncChannelLimit: number;
+  lastYoutubeSyncAt?: string;
+  lastDriveSyncAt?: string;
+  cloudEventCursor?: string;
+}
+
+export interface AuthStatus {
+  connected: boolean;
+  email?: string;
+  expiresAt?: number;
+}
+
+export interface AppState {
+  schemaVersion: 1;
+  groups: Group[];
+  channels: Channel[];
+  videos: Video[];
+  videoStates: Record<string, VideoState>;
+  settings: Settings;
+  updatedAt: string;
+}
+
+export type VideoSort = 'newest' | 'oldest' | 'duration-desc' | 'duration-asc' | 'popular';
+
+export interface FeedFilter {
+  groupId: string | null;
+  query: string;
+  contentTypes: ContentType[];
+  duration: 'any' | 'short' | 'medium' | 'long';
+  watched: 'all' | 'unwatched' | 'watched';
+  sort: VideoSort;
+}
+
+export interface DiscoveredPayload {
+  channels: Channel[];
+  videos: Video[];
+}
+
+export interface CloudVideoEvent {
+  id: string;
+  video: Video;
+}
