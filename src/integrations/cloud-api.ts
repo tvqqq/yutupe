@@ -64,6 +64,14 @@ export async function organizeChannelsWithAi(baseUrl: string, accessToken: strin
   });
 }
 
+export interface UnsubscribeRecommendation { channelId: string; reason: string; confidence: number }
+
+export async function suggestUnsubscriptionsWithAi(baseUrl: string, accessToken: string, signals: Array<{ channelId: string; channelTitle: string; rejectedCount: number; cachedCount: number; rejectedTitles: string[] }>): Promise<{ recommendations: UnsubscribeRecommendation[] }> {
+  return request(baseUrl, '/v1/ai/unsubscribe-suggestions', accessToken, {
+    method: 'POST', body: JSON.stringify({ signals })
+  });
+}
+
 export async function registerWebSub(baseUrl: string, accessToken: string, channelIds: string[]): Promise<{ registered: number }> {
   return request(baseUrl, '/v1/websub/subscriptions', accessToken, {
     method: 'POST', body: JSON.stringify({ channelIds })

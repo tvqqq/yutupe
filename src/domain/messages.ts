@@ -1,10 +1,11 @@
-import type { AppState, AuthStatus, DiscoveredPayload, Group, Settings } from './types';
+import type { AppState, AuthStatus, DiscoveredPayload, Group, Settings, Video } from './types';
 
 export type AppMessage =
   | { type: 'GET_STATE' }
   | { type: 'UPSERT_GROUP'; payload: Partial<Group> & Pick<Group, 'name' | 'icon' | 'color'> }
   | { type: 'DELETE_GROUP'; payload: { groupId: string } }
   | { type: 'REORDER_GROUP'; payload: { groupId: string; direction: 'up' | 'down' } }
+  | { type: 'REORDER_GROUPS'; payload: { groupIds: string[] } }
   | { type: 'SET_CHANNEL_GROUPS'; payload: { channelId: string; groupIds: string[] } }
   | { type: 'UPDATE_CHANNEL_TAGS'; payload: { channelId: string; tags: string[] } }
   | { type: 'REMOVE_CHANNEL_LOCAL'; payload: { channelId: string } }
@@ -23,6 +24,7 @@ export type AppMessage =
   | { type: 'AI_TAG_CHANNEL'; payload: { channelId: string } }
   | { type: 'AI_ORGANIZE_CHANNELS' }
   | { type: 'FETCH_SUGGESTIONS'; payload: { query?: string } }
+  | { type: 'AI_UNSUBSCRIBE_SUGGESTIONS'; payload: { channelIds: string[] } }
   | { type: 'REGISTER_WEBSUB' }
   | { type: 'POLL_CLOUD_EVENTS' }
   | { type: 'CHECK_CLOUD_STATUS' }
@@ -31,7 +33,10 @@ export type AppMessage =
   | { type: 'RESET_STATE' }
   | { type: 'OPEN_PANEL' }
   | { type: 'TOGGLE_PANEL' }
-  | { type: 'ENRICH_CHANNEL_BATCH' };
+  | { type: 'ENRICH_CHANNEL_BATCH' }
+  | { type: 'CLAIM_ENRICHMENT_BATCH' }
+  | { type: 'APPLY_ENRICHMENT_BATCH'; payload: { channelIds: string[]; videos: Video[]; skippedChannelIds: string[] } }
+  | { type: 'FAIL_ENRICHMENT_BATCH'; payload: { channelIds: string[]; error: string } };
 
 export interface AppResponse {
   ok: boolean;

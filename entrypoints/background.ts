@@ -1,15 +1,16 @@
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
-import { createInitialState, makeId, MAX_CACHED_VIDEOS, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, nowIso, retainOnlyChannelIds, STORAGE_KEY, upsertById } from '@/src/domain/state';
+import { createInitialState, ENRICHMENT_MAX_RETRIES, makeId, MAX_CACHED_VIDEOS, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, nowIso, queueChannelsForEnrichment, retainOnlyChannelIds, STORAGE_KEY, upsertById, withEnrichmentSummary } from '@/src/domain/state';
 import type { AppState, Channel, Group, Video } from '@/src/domain/types';
 import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, requireIdentityToken } from '@/src/integrations/google-auth';
 import { fetchSubscriptions, fetchSuggestedVideos, fetchUploadFeed, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
-import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags } from '@/src/integrations/cloud-api';
+import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags, suggestUnsubscriptionsWithAi } from '@/src/integrations/cloud-api';
 import { PRODUCTION_CLOUD_API_BASE_URL } from '@/src/config';
 
 async function readState(): Promise<AppState> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
-  const state = (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
+  let state = (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
+  if (state.settings.enrichmentStatus === 'running' && state.channels.some((channel) => !channel.enrichment)) state = queueChannelsForEnrichment(state);
   return state.settings.cloudApiBaseUrl?.trim()
     ? state
     : { ...state, settings: { ...state.settings, cloudApiBaseUrl: PRODUCTION_CLOUD_API_BASE_URL } };
@@ -112,7 +113,7 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const authStatus = await connectGoogle(state.settings.googleClientId);
       const apiChannels = await fetchSubscriptions(await requireAccessToken());
       state = retainOnlySubscriptions(state, apiChannels);
-      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso(), enrichmentCursor: 0, enrichmentTotal: state.channels.length, enrichmentStatus: state.channels.length ? 'running' : 'complete' } };
+      state = queueChannelsForEnrichment({ ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } });
       const saved = await writeState(state);
       if (state.channels.length) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 1_000 });
       return { ok: true, state: saved, authStatus };
@@ -127,27 +128,55 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const accessToken = await requireAccessToken();
       const apiChannels = await fetchSubscriptions(accessToken);
       state = retainOnlySubscriptions(state, apiChannels);
-      state = { ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso(), enrichmentCursor: 0, enrichmentTotal: state.channels.length, enrichmentStatus: state.channels.length ? 'running' : 'complete' } };
+      state = queueChannelsForEnrichment({ ...state, settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } });
       if (state.channels.length) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 1_000 });
     }
 
-    if (message.type === 'ENRICH_CHANNEL_BATCH') {
-      if (state.settings.enrichmentStatus !== 'running') return { ok: true, state };
-      const cursor = state.settings.enrichmentCursor ?? 0;
-      const batch = state.channels.slice(cursor, cursor + 10).filter((channel) => channel.uploadsPlaylistId);
-      const { videos } = batch.length ? await fetchUploadFeed(await requireAccessToken(), batch, 1) : { videos: [] };
-      const latest = new Map(videos.map((video) => [video.channelId, video.publishedAt ?? video.discoveredAt]));
-      const nextCursor = Math.min(state.channels.length, cursor + 10);
-      const complete = nextCursor >= state.channels.length;
-      state = {
-        ...state,
-        channels: state.channels.map((channel) => latest.has(channel.id) ? { ...channel, lastPublishedAt: latest.get(channel.id) } : channel),
-        videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS),
-        settings: { ...state.settings, enrichmentCursor: nextCursor, enrichmentTotal: state.channels.length, enrichmentStatus: complete ? 'complete' : 'running', lastEnrichmentAt: complete ? nowIso() : state.settings.lastEnrichmentAt }
-      };
+    if (message.type === 'CLAIM_ENRICHMENT_BATCH' || message.type === 'ENRICH_CHANNEL_BATCH') {
+      const now = Date.now();
+      const abandonedBefore = now - 2 * 60_000;
+      state = { ...state, channels: state.channels.map((channel) => channel.enrichment?.status === 'loading' && Date.parse(channel.enrichment.lastAttemptAt ?? '1970-01-01') <= abandonedBefore && channel.enrichment.retryCount >= ENRICHMENT_MAX_RETRIES
+        ? { ...channel, enrichment: { ...channel.enrichment, status: 'error', priority: false, error: 'Background worker bị gián đoạn quá số lần retry.', nextRetryAt: undefined } }
+        : channel) };
+      const batch = state.channels
+        .filter((channel) => channel.uploadsPlaylistId && (channel.enrichment?.status === 'pending' || (channel.enrichment?.status === 'error' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES && Date.parse(channel.enrichment.nextRetryAt ?? '1970-01-01') <= now) || (channel.enrichment?.status === 'loading' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES && Date.parse(channel.enrichment.lastAttemptAt ?? '1970-01-01') <= abandonedBefore)))
+        .sort((a, b) => Number(Boolean(b.enrichment?.priority)) - Number(Boolean(a.enrichment?.priority)) || Number(!b.lastPublishedAt) - Number(!a.lastPublishedAt) || Date.parse(a.enrichment?.lastAttemptAt ?? '1970-01-01') - Date.parse(b.enrichment?.lastAttemptAt ?? '1970-01-01'))
+        .slice(0, 10);
+      if (!batch.length) {
+        const saved = await writeState(withEnrichmentSummary(state));
+        return { ok: true, state: saved, data: { channels: [] } };
+      }
+      const ids = new Set(batch.map((channel) => channel.id));
+      state = withEnrichmentSummary({ ...state, channels: state.channels.map((channel) => ids.has(channel.id) ? { ...channel, enrichment: { ...channel.enrichment, status: 'loading', retryCount: (channel.enrichment?.retryCount ?? 0) + 1, lastAttemptAt: nowIso(), nextRetryAt: undefined, error: undefined } } : channel) });
       const saved = await writeState(state);
-      if (!complete) await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 5_000 });
-      return { ok: true, state: saved, data: { cursor: nextCursor, total: state.channels.length, complete } };
+      return { ok: true, state: saved, data: { channels: batch } };
+    }
+
+    if (message.type === 'APPLY_ENRICHMENT_BATCH') {
+      const ids = new Set(message.payload.channelIds);
+      const skipped = new Set(message.payload.skippedChannelIds);
+      const latest = new Map(message.payload.videos.map((video) => [video.channelId, video.publishedAt ?? video.discoveredAt]));
+      const finishedAt = nowIso();
+      state = withEnrichmentSummary({
+        ...state,
+        channels: state.channels.map((channel) => !ids.has(channel.id) ? channel : skipped.has(channel.id)
+          ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined, enrichment: { ...channel.enrichment, status: 'error', priority: false, retryCount: ENRICHMENT_MAX_RETRIES, error: 'Uploads playlist không còn khả dụng.', nextRetryAt: undefined } }
+          : { ...channel, lastPublishedAt: latest.get(channel.id) ?? channel.lastPublishedAt, enrichment: { ...channel.enrichment, status: 'ready', priority: false, retryCount: channel.enrichment?.retryCount ?? 0, lastSuccessAt: finishedAt, error: undefined, nextRetryAt: undefined } }),
+        videos: mergeDiscoveredVideos(state.videos, message.payload.videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS)
+      });
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { complete: state.settings.enrichmentStatus !== 'running' } };
+    }
+
+    if (message.type === 'FAIL_ENRICHMENT_BATCH') {
+      const ids = new Set(message.payload.channelIds);
+      state = withEnrichmentSummary({ ...state, channels: state.channels.map((channel) => {
+        if (!ids.has(channel.id)) return channel;
+        const retryCount = channel.enrichment?.retryCount ?? 1;
+        return { ...channel, enrichment: { ...channel.enrichment, status: 'error', retryCount, error: message.payload.error.slice(0, 240), nextRetryAt: retryCount < ENRICHMENT_MAX_RETRIES ? new Date(Date.now() + Math.min(5 * 60_000, 30_000 * 2 ** (retryCount - 1))).toISOString() : undefined } };
+      }) });
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { complete: state.settings.enrichmentStatus !== 'running' } };
     }
 
     if (message.type === 'REFRESH_YOUTUBE_FEED') {
@@ -163,14 +192,16 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const { videos, skippedChannels } = await fetchUploadFeed(accessToken, feedChannels, perChannel);
       const skippedIds = new Set(skippedChannels.map((item) => item.channelId));
       if (skippedIds.size) {
-        state = { ...state, channels: state.channels.map((channel) => skippedIds.has(channel.id) ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined } : channel) };
+        state = { ...state, channels: state.channels.map((channel) => skippedIds.has(channel.id) ? { ...channel, status: 'unavailable', uploadsPlaylistId: undefined, enrichment: { ...channel.enrichment, status: 'error', priority: false, retryCount: ENRICHMENT_MAX_RETRIES, error: 'Uploads playlist không còn khả dụng.', nextRetryAt: undefined } } : channel) };
       }
       const latestByChannel = new Map<string, string>();
       for (const video of videos) {
         const published = video.publishedAt ?? video.discoveredAt;
         if (!latestByChannel.get(video.channelId) || Date.parse(published) > Date.parse(latestByChannel.get(video.channelId)!)) latestByChannel.set(video.channelId, published);
       }
-      state = { ...state, channels: state.channels.map((channel) => latestByChannel.has(channel.id) ? { ...channel, lastPublishedAt: latestByChannel.get(channel.id) } : channel) };
+      const refreshedIds = new Set(feedChannels.map((channel) => channel.id));
+      const refreshedAt = nowIso();
+      state = withEnrichmentSummary({ ...state, channels: state.channels.map((channel) => refreshedIds.has(channel.id) && !skippedIds.has(channel.id) ? { ...channel, lastPublishedAt: latestByChannel.get(channel.id) ?? channel.lastPublishedAt, enrichment: { ...channel.enrichment, status: 'ready', priority: false, retryCount: channel.enrichment?.retryCount ?? 0, lastSuccessAt: refreshedAt, error: undefined, nextRetryAt: undefined } } : channel) });
       state = { ...state, videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS), settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
       const saved = await writeState(state);
       return { ok: true, state: saved, data: { videoCount: videos.length, skippedChannels } };
@@ -200,11 +231,15 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
     if (message.type === 'DRIVE_PUSH') {
       const result = await pushToDrive(await requireAccessToken(), state);
       state = { ...state, settings: { ...state.settings, lastDriveSyncAt: result.syncedAt } };
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: result };
     }
 
     if (message.type === 'DRIVE_PULL') {
-      state = applyDriveSnapshot(state, await pullFromDrive(await requireAccessToken()));
-      state = retainOnlySubscriptions(state, await fetchSubscriptions(await requireAccessToken()));
+      const snapshot = await pullFromDrive(await requireAccessToken());
+      state = applyDriveSnapshot(state, snapshot);
+      const saved = await writeState(state);
+      return { ok: true, state: saved, data: { restoredFrom: snapshot.exportedAt, syncedAt: saved.settings.lastDriveSyncAt } };
     }
 
     if (message.type === 'AI_TAG_CHANNEL') {
@@ -234,6 +269,17 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       const inferred = state.groups.slice().sort((a, b) => b.channelIds.length - a.channelIds.length)[0]?.name ?? recentVideo?.channelTitle ?? 'technology';
       const query = message.payload.query?.trim() || inferred;
       return { ok: true, state, data: { query, videos: await fetchSuggestedVideos(await requireAccessToken(), query) } };
+    }
+
+    if (message.type === 'AI_UNSUBSCRIBE_SUGGESTIONS') {
+      const requested = new Set(message.payload.channelIds);
+      const signals = state.channels.filter((channel) => requested.has(channel.id)).map((channel) => {
+        const cached = state.videos.filter((video) => video.channelId === channel.id);
+        const rejected = cached.filter((video) => state.videoStates[video.id]?.hiddenAt);
+        return { channelId: channel.id, channelTitle: channel.title, rejectedCount: rejected.length, cachedCount: cached.length, rejectedTitles: rejected.slice(-8).map((video) => video.title) };
+      }).filter((signal) => signal.rejectedCount > 0);
+      const data = await suggestUnsubscriptionsWithAi(state.settings.cloudApiBaseUrl, await requireIdentityToken(), signals);
+      return { ok: true, state, data };
     }
 
     if (message.type === 'REGISTER_WEBSUB') {
@@ -289,7 +335,8 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
         updatedAt: now
       };
       if (!group.name) throw new Error('Tên group không được để trống.');
-      state = { ...state, groups: upsertById(state.groups, [group]) };
+      state = queueChannelsForEnrichment({ ...state, groups: upsertById(state.groups, [group]) }, group.channelIds);
+      if (group.channelIds.length && state.settings.enrichmentStatus === 'running') await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 250 });
     }
 
     if (message.type === 'DELETE_GROUP') {
@@ -304,6 +351,13 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       state = { ...state, groups: ordered.map((group, position) => ({ ...group, position, updatedAt: nowIso() })) };
     }
 
+    if (message.type === 'REORDER_GROUPS') {
+      const requested = [...new Set(message.payload.groupIds)];
+      if (requested.length !== state.groups.length || requested.some((id) => !state.groups.some((group) => group.id === id))) throw new Error('Danh sách thứ tự groups không hợp lệ.');
+      const byId = new Map(state.groups.map((group) => [group.id, group]));
+      state = { ...state, groups: requested.map((id, position) => ({ ...byId.get(id)!, position, updatedAt: nowIso() })) };
+    }
+
     if (message.type === 'SET_CHANNEL_GROUPS') {
       const selected = new Set(message.payload.groupIds);
       state = {
@@ -316,6 +370,8 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
           updatedAt: nowIso()
         }))
       };
+      state = queueChannelsForEnrichment(state, [message.payload.channelId]);
+      if (state.settings.enrichmentStatus === 'running') await browser.alarms.create('youtube-collections-enrichment', { when: Date.now() + 250 });
     }
 
     if (message.type === 'UPDATE_CHANNEL_TAGS') {
@@ -405,12 +461,59 @@ export default defineBackground(() => {
     await browser.alarms.create('youtube-collections-cloud-events', { periodInMinutes: 5 });
   });
 
-  let mutationQueue = Promise.resolve<AppResponse>({ ok: true });
-  browser.runtime.onMessage.addListener((message) => {
-    const task = mutationQueue.then(() => handleMessage(message as AppMessage));
-    mutationQueue = task.catch((error) => ({ ok: false, error: error instanceof Error ? error.message : 'Unknown error' }));
-    return task;
+  type QueuedMessage = { message: AppMessage; resolve: (response: AppResponse) => void };
+  const priorityMessages: QueuedMessage[] = [];
+  const regularMessages: QueuedMessage[] = [];
+  const priorityTypes = new Set<AppMessage['type']>(['UPSERT_GROUP', 'DELETE_GROUP', 'REORDER_GROUP', 'REORDER_GROUPS', 'SET_CHANNEL_GROUPS', 'CLAIM_ENRICHMENT_BATCH', 'APPLY_ENRICHMENT_BATCH', 'FAIL_ENRICHMENT_BATCH']);
+  let queueRunning = false;
+  const drainQueue = async () => {
+    if (queueRunning) return;
+    queueRunning = true;
+    try {
+      let item: QueuedMessage | undefined;
+      while ((item = priorityMessages.shift() ?? regularMessages.shift())) item.resolve(await handleMessage(item.message));
+    } finally { queueRunning = false; }
+  };
+  const enqueueMessage = (message: AppMessage, priority = priorityTypes.has(message.type)) => new Promise<AppResponse>((resolve) => {
+    (priority ? priorityMessages : regularMessages).push({ message, resolve });
+    void drainQueue();
   });
+  browser.runtime.onMessage.addListener((message) => {
+    return enqueueMessage(message as AppMessage);
+  });
+
+  const scheduleNextEnrichment = async (state?: AppState) => {
+    const current = state ?? await readState();
+    if (current.settings.enrichmentStatus !== 'running') return;
+    const nextRetry = current.channels
+      .filter((channel) => channel.enrichment?.status === 'error' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES && channel.enrichment.nextRetryAt)
+      .map((channel) => Date.parse(channel.enrichment!.nextRetryAt!))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b)[0];
+    const hasPending = current.channels.some((channel) => channel.enrichment?.status === 'pending');
+    await browser.alarms.create('youtube-collections-enrichment', { when: hasPending ? Date.now() + 5_000 : Math.max(Date.now() + 5_000, nextRetry ?? Date.now() + 30_000) });
+  };
+
+  let enrichmentRunnerActive = false;
+  const runEnrichmentBatch = async () => {
+    if (enrichmentRunnerActive) return;
+    enrichmentRunnerActive = true;
+    try {
+      const claimed = await enqueueMessage({ type: 'CLAIM_ENRICHMENT_BATCH' }, true);
+      const channels = ((claimed.data as { channels?: Channel[] } | undefined)?.channels ?? []);
+      if (!channels.length) { await scheduleNextEnrichment(claimed.state); return; }
+      try {
+        const result = await fetchUploadFeed(await requireAccessToken(), channels, 1);
+        const applied = await enqueueMessage({ type: 'APPLY_ENRICHMENT_BATCH', payload: { channelIds: channels.map((channel) => channel.id), videos: result.videos, skippedChannelIds: result.skippedChannels.map((channel) => channel.channelId) } }, true);
+        await scheduleNextEnrichment(applied.state);
+      } catch (error) {
+        const failed = await enqueueMessage({ type: 'FAIL_ENRICHMENT_BATCH', payload: { channelIds: channels.map((channel) => channel.id), error: error instanceof Error ? error.message : 'Background enrichment thất bại.' } }, true);
+        await scheduleNextEnrichment(failed.state);
+      }
+    } finally { enrichmentRunnerActive = false; }
+  };
+
+  browser.runtime.onStartup.addListener(() => { void scheduleNextEnrichment(); });
 
   browser.action.onClicked.addListener(async (tab) => {
     if (!tab.id || !tab.url?.startsWith('https://www.youtube.com/')) return;
@@ -426,8 +529,7 @@ export default defineBackground(() => {
 
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'youtube-collections-enrichment') {
-      const task = mutationQueue.then(() => handleMessage({ type: 'ENRICH_CHANNEL_BATCH' }));
-      mutationQueue = task.catch((error) => ({ ok: false, error: error instanceof Error ? error.message : 'Unknown error' }));
+      void runEnrichmentBatch();
       return;
     }
     if (alarm.name !== 'youtube-collections-cloud-events') return;

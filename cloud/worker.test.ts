@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeAiGroupBatches, parseAtomVideo, parseCursor, safeEqual } from './worker';
+import { fallbackAiGroups, mergeAiGroupBatches, parseAtomVideo, parseCursor, safeEqual } from './worker';
 
 describe('cloud worker helpers', () => {
   it('parses a YouTube Atom entry', () => {
@@ -29,5 +29,16 @@ describe('cloud worker helpers', () => {
       { name: 'Công nghệ', icon: '💻', color: '#22d3ee', channelIds: ['UC1234567890123456789012'] },
       { name: 'Khác', icon: '📁', color: '#94a3b8', channelIds: ['UC1234567890123456789013'] }
     ]);
+  });
+
+  it('falls back to deterministic groups when an AI batch is malformed', () => {
+    const result = fallbackAiGroups([
+      { id: 'UC1234567890123456789012', title: 'Coding Tech Review', url: 'https://youtube.com/a' },
+      { id: 'UC1234567890123456789013', title: 'Stock Investment', url: 'https://youtube.com/b' },
+      { id: 'UC1234567890123456789014', title: 'Uncategorized', url: 'https://youtube.com/c' }
+    ]);
+    expect(result.groups.find((group) => group.name === 'Công nghệ')?.channelIds).toEqual(['UC1234567890123456789012']);
+    expect(result.groups.find((group) => group.name === 'Tài chính & Đầu tư')?.channelIds).toEqual(['UC1234567890123456789013']);
+    expect(result.groups.find((group) => group.name === 'Khác')?.channelIds).toEqual(['UC1234567890123456789014']);
   });
 });

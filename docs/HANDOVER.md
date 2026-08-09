@@ -8,7 +8,7 @@
 | DOM discovery + local feed | Done |
 | Google OAuth | Done; manifest OAuth production + PKCE fallback |
 | Subscription import | Done; pagination + channel details theo batch 50, không chờ feed từng channel |
-| Background channel enrichment | Done; 10 channels/batch qua MV3 alarm, progress lưu trong settings |
+| Progressive channel enrichment | Done; fetch chạy ngoài UI mutation queue, commit theo batch 10, trạng thái/retry lưu per-channel |
 | Canonical channel migration | Done cho exact custom URL/handle aliases |
 | YouTube API feed | Done; uploads playlist + video details; cache được bổ sung dần sau sync nhanh |
 | Group feed priority | Done; sắp xếp bằng nút lên/xuống, Feed navbar đọc `Group.position` |
@@ -48,7 +48,8 @@
 - PKCE fallback phụ thuộc OAuth client/redirect policy và không phải đường production khuyến nghị.
 - Access token session hết hạn/restart yêu cầu connect lại; chưa lưu refresh token vì không muốn lưu credential dài hạn trong local storage.
 - API feed giới hạn số channel mỗi lần refresh để kiểm soát quota.
-- Sau Connect/Sync, metadata subscriptions xuất hiện trước; `youtube-collections-enrichment` tiếp tục lấy video mới nhất theo batch trong background. OAuth session phải còn hiệu lực để job hoàn tất.
+- Sau Connect/Sync, metadata subscriptions xuất hiện trước và Groups dùng được ngay. `youtube-collections-enrichment` chỉ queue channel thiếu/stale (>24h), ưu tiên channel của group vừa tạo/gán, fetch ngoài mutation queue và atomic-commit kết quả.
+- Mỗi channel có `enrichment.status`, `retryCount`, timestamps và `error`. Lỗi retry tối đa 3 lần với exponential backoff; exhausted errors được tính là settled để UI không quay vô hạn. Sync YouTube kế tiếp sẽ reset retry cho dữ liệu stale.
 - Enrichment hiện lấy 1 video mới nhất/channel. Refresh Feed vẫn là luồng chủ động để lấy lịch sử sâu hơn.
 - Drive pull là cloud-wins cho groups/channels/watched state; chưa merge đồng thời nhiều thiết bị.
 - AI tags được apply ngay khi backend trả về; nên thêm preview/approve cho bulk AI.

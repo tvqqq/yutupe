@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, retainOnlyChannelIds, selectFeed, upsertById } from './state';
+import { createInitialState, ENRICHMENT_MAX_RETRIES, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, queueChannelsForEnrichment, retainOnlyChannelIds, selectFeed, upsertById, withEnrichmentSummary } from './state';
 import type { AppState, FeedFilter, Video } from './types';
 
 const videos: Video[] = [
@@ -56,5 +56,23 @@ describe('state helpers', () => {
     expect(result.channels.map((item) => item.id)).toEqual(['c1']);
     expect(result.videos.some((item) => item.channelId === 'mock')).toBe(false);
     expect(result.groups[0]?.channelIds).toEqual(['c1']);
+  });
+
+  it('queues only missing or stale channel enrichment and prioritizes a selected group', () => {
+    const now = Date.parse('2026-08-09T10:00:00Z');
+    const current = { ...state(), channels: [
+      { id: 'fresh', title: 'Fresh', url: '', lastSeenAt: '', status: 'active' as const, tags: [], uploadsPlaylistId: 'UUfresh', enrichment: { status: 'ready' as const, retryCount: 0, lastSuccessAt: '2026-08-09T09:00:00Z' } },
+      { id: 'missing', title: 'Missing', url: '', lastSeenAt: '', status: 'active' as const, tags: [], uploadsPlaylistId: 'UUmissing' }
+    ] };
+    const result = queueChannelsForEnrichment(current, ['missing'], false, now);
+    expect(result.channels.find((channel) => channel.id === 'fresh')?.enrichment?.status).toBe('ready');
+    expect(result.channels.find((channel) => channel.id === 'missing')?.enrichment).toMatchObject({ status: 'pending', priority: true, retryCount: 0 });
+    expect(result.settings.enrichmentStatus).toBe('running');
+  });
+
+  it('settles exhausted enrichment errors instead of showing a permanent running state', () => {
+    const current = { ...state(), channels: [{ id: 'failed', title: 'Failed', url: '', lastSeenAt: '', status: 'active' as const, tags: [], enrichment: { status: 'error' as const, retryCount: ENRICHMENT_MAX_RETRIES, error: 'quota' } }] };
+    const result = withEnrichmentSummary(current);
+    expect(result.settings).toMatchObject({ enrichmentStatus: 'complete', enrichmentCursor: 1, enrichmentTotal: 1, enrichmentErrorCount: 1 });
   });
 });

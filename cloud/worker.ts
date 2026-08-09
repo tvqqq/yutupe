@@ -209,14 +209,22 @@ const tagsSchema = {
   }, required: ['tags', 'suggestedGroup', 'confidence']
 };
 
-const groupsSchema = {
+const groupRulesSchema = {
   type: 'object', additionalProperties: false,
   properties: {
     groups: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
-      name: { type: 'string' }, icon: { type: 'string' }, color: { type: 'string' },
-      channelIds: { type: 'array', items: { type: 'string' } }
-    }, required: ['name', 'icon', 'color', 'channelIds'] } }
+      name: { type: 'string' }, keywords: { type: 'array', items: { type: 'string' }, maxItems: 12 }
+    }, required: ['name', 'keywords'] } }
   }, required: ['groups']
+};
+
+const unsubscribeSuggestionsSchema = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    recommendations: { type: 'array', maxItems: 20, items: { type: 'object', additionalProperties: false, properties: {
+      channelId: { type: 'string' }, reason: { type: 'string' }, confidence: { type: 'number' }
+    }, required: ['channelId', 'reason', 'confidence'] } }
+  }, required: ['recommendations']
 };
 
 function normalizeChannels(value: unknown): ChannelInput[] {
@@ -239,17 +247,22 @@ async function aiTags(request: Request, env: Env, identity: Identity, cors: Head
   return json({ tags: [...new Set(result.tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 6), suggestedGroup: result.suggestedGroup ?? undefined, confidence: Math.max(0, Math.min(1, result.confidence)) }, 200, cors);
 }
 
-async function mapConcurrent<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await mapper(items[index]!, index);
-    }
+async function aiUnsubscribeSuggestions(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
+  if (!(await rateLimit(identity, env, 'ai-unsubscribe', 8))) return errorResponse('Đã vượt giới hạn phân tích AI 8 requests/phút.', 429, cors);
+  const body = await readJson<{ signals?: Array<{ channelId?: string; channelTitle?: string; rejectedCount?: number; cachedCount?: number; rejectedTitles?: string[] }> }>(request);
+  const signals = (Array.isArray(body.signals) ? body.signals : []).slice(0, 100).flatMap((item) => {
+    if (!item.channelId || !CHANNEL_ID.test(item.channelId) || !item.channelTitle) return [];
+    return [{ channelId: item.channelId, channelTitle: item.channelTitle.slice(0, 160), rejectedCount: Math.max(0, Number(item.rejectedCount) || 0), cachedCount: Math.max(1, Number(item.cachedCount) || 1), rejectedTitles: (Array.isArray(item.rejectedTitles) ? item.rejectedTitles : []).filter((title): title is string => typeof title === 'string').slice(0, 8).map((title) => title.slice(0, 180)) }];
   });
-  await Promise.all(workers);
-  return results;
+  if (!signals.length) return json({ recommendations: [] }, 200, cors);
+  try {
+    const result = await openAiStructured<{ recommendations: Array<{ channelId: string; reason: string; confidence: number }> }>(env, 'unsubscribe_recommendations', unsubscribeSuggestionsSchema,
+      'Phân tích negative feedback của người dùng. Chỉ đề xuất unsubscribe khi có tín hiệu lặp lại đủ mạnh, không chỉ vì một video. Viết lý do ngắn bằng tiếng Việt, dựa trên rejectedCount, tỷ lệ trong cachedCount và tiêu đề bị từ chối. Không tạo channel ID mới.', { signals }, 2600);
+    const allowed = new Set(signals.map((signal) => signal.channelId));
+    return json({ recommendations: result.recommendations.filter((item) => allowed.has(item.channelId)).map((item) => ({ channelId: item.channelId, reason: item.reason.trim().slice(0, 240), confidence: Math.max(0, Math.min(1, item.confidence)) })).filter((item) => item.confidence >= .55) }, 200, cors);
+  } catch {
+    return json({ recommendations: signals.filter((signal) => signal.rejectedCount >= 3 && signal.rejectedCount / signal.cachedCount >= .4).map((signal) => ({ channelId: signal.channelId, reason: `${signal.rejectedCount}/${signal.cachedCount} video gần đây đã bị đánh dấu Không xem.`, confidence: Math.min(.95, .55 + signal.rejectedCount / signal.cachedCount * .35) })) }, 200, cors);
+  }
 }
 
 function normalizedGroupName(value: string): string {
@@ -274,20 +287,55 @@ export function mergeAiGroupBatches(channels: ChannelInput[], batches: Array<{ g
   return AI_GROUP_TAXONOMY.map((group) => ({ ...group, channelIds: idsByName.get(group.name)! })).filter((group) => group.channelIds.length);
 }
 
+const AI_GROUP_KEYWORDS: Record<string, string[]> = {
+  'Công nghệ': ['tech', 'technology', 'công nghệ', 'software', 'developer', 'coding', 'code', 'computer', 'điện thoại', 'review'],
+  'Tài chính & Đầu tư': ['tài chính', 'đầu tư', 'chứng khoán', 'stock', 'crypto', 'bitcoin', 'finance', 'wealth'],
+  'Kinh doanh': ['kinh doanh', 'business', 'marketing', 'startup', 'doanh nghiệp', 'sales'],
+  'Tin tức': ['tin tức', 'news', 'báo', 'thời sự', 'truyền hình', 'tv', 'media'],
+  'Thể thao': ['thể thao', 'sport', 'football', 'bóng đá', 'bóng rổ', 'fitness', 'gym', 'cycling'],
+  'Giải trí': ['giải trí', 'entertainment', 'show', 'movie', 'phim', 'comedy', 'vlog'],
+  'Âm nhạc': ['âm nhạc', 'music', 'official artist', 'singer', 'records', 'band'],
+  'Giáo dục': ['giáo dục', 'education', 'academy', 'university', 'school', 'học', 'tutorial'],
+  'Du lịch & Đời sống': ['du lịch', 'travel', 'đời sống', 'lifestyle', 'daily', 'family'],
+  'Ẩm thực': ['ẩm thực', 'food', 'cooking', 'kitchen', 'cook', 'ăn'],
+  'Sức khỏe': ['sức khỏe', 'health', 'medical', 'doctor', 'bác sĩ', 'y khoa']
+};
+
+export function fallbackAiGroups(channels: ChannelInput[], extraKeywords: Record<string, string[]> = {}): { groups: AiGroup[] } {
+  const idsByName = new Map<string, string[]>(AI_GROUP_TAXONOMY.map((group) => [group.name, []]));
+  for (const channel of channels) {
+    const haystack = `${channel.title} ${channel.description ?? ''}`.normalize('NFC').toLocaleLowerCase();
+    const name = Object.entries(AI_GROUP_KEYWORDS).find(([groupName, keywords]) => [...keywords, ...(extraKeywords[groupName] ?? [])].some((keyword) => haystack.includes(keyword.toLocaleLowerCase())))?.[0] ?? 'Khác';
+    idsByName.get(name)!.push(channel.id);
+  }
+  return { groups: AI_GROUP_TAXONOMY.map((group) => ({ ...group, channelIds: idsByName.get(group.name)! })).filter((group) => group.channelIds.length) };
+}
+
 async function aiGroups(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
   if (!(await rateLimit(identity, env, 'ai-groups', 4))) return errorResponse('Đã vượt giới hạn AI Groups 4 requests/phút.', 429, cors);
   const body = await readJson<{ channels?: ChannelInput[] }>(request, 2_000_000);
   const channels = normalizeChannels(body.channels);
   if (!channels.length) return json({ groups: [] }, 200, cors);
-  // A single 900+ channel inference exceeds Workers AI's synchronous request window (3046).
-  // Keep every inference small, run a bounded number concurrently, then merge against one stable taxonomy.
-  const chunks: ChannelInput[][] = [];
-  for (let index = 0; index < channels.length; index += 75) chunks.push(channels.slice(index, index + 75));
   const taxonomy = AI_GROUP_TAXONOMY.map((group) => group.name).join(', ');
-  const batchResults = await mapConcurrent(chunks, 4, async (chunk, index) => openAiStructured<{ groups: AiGroup[] }>(env, `youtube_channel_groups_${index}`.slice(0, 60), groupsSchema,
-    `Phân loại từng kênh YouTube vào đúng một nhóm trong danh sách cố định sau: ${taxonomy}. Phải dùng chính xác tên nhóm, icon và màu đã cung cấp; không tạo nhóm hoặc channel ID mới.`,
-    { taxonomy: AI_GROUP_TAXONOMY, channels: chunk.map(({ id, title, description }) => ({ id, title, description: description?.slice(0, 100) })) }, Math.max(1800, chunk.length * 24)));
-  return json({ groups: mergeAiGroupBatches(channels, batchResults) }, 200, cors);
+  // Learn compact classification rules in one AI call. Classifying hundreds of
+  // channels with one call truncates JSON; one call per batch exceeds the Worker
+  // subrequest limit. Applying AI-generated rules locally avoids both failure modes.
+  const sampleSize = Math.min(240, channels.length);
+  const sample = Array.from({ length: sampleSize }, (_, index) => channels[Math.floor(index * channels.length / sampleSize)]!);
+  let extraKeywords: Record<string, string[]> = {};
+  try {
+    const rules = await openAiStructured<{ groups: Array<{ name: string; keywords: string[] }> }>(env, 'youtube_channel_group_rules', groupRulesSchema,
+      `Dựa trên mẫu tên kênh, bổ sung từ khóa ngắn để nhận diện các nhóm cố định sau: ${taxonomy}. Chỉ dùng chính xác các tên nhóm này. Mỗi nhóm tối đa 12 từ khóa tiếng Việt hoặc tiếng Anh.`,
+      { groups: AI_GROUP_TAXONOMY.map((group) => group.name), channels: sample.map(({ title, description }) => ({ title, description: description?.slice(0, 80) })) }, 3000);
+    const taxonomyByName = new Map(AI_GROUP_TAXONOMY.map((group) => [normalizedGroupName(group.name), group.name]));
+    for (const group of rules.groups) {
+      const name = taxonomyByName.get(normalizedGroupName(group.name));
+      if (name) extraKeywords[name] = group.keywords.filter((keyword) => typeof keyword === 'string').slice(0, 12);
+    }
+  } catch (error) {
+    console.warn('AI group rules fallback', error instanceof Error ? error.message : error);
+  }
+  return json(fallbackAiGroups(channels, extraKeywords), 200, cors);
 }
 
 function topicFor(channelId: string): string { return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`; }
@@ -444,6 +492,7 @@ async function route(request: Request, env: Env, ctx: WorkerExecutionContext): P
   if (url.pathname === '/v1/status' && request.method === 'GET') return cloudStatus(env, identity, cors);
   if (url.pathname === '/v1/ai/tags' && request.method === 'POST') return aiTags(request, env, identity, cors);
   if (url.pathname === '/v1/ai/groups' && request.method === 'POST') return aiGroups(request, env, identity, cors);
+  if (url.pathname === '/v1/ai/unsubscribe-suggestions' && request.method === 'POST') return aiUnsubscribeSuggestions(request, env, identity, cors);
   if (url.pathname === '/v1/websub/subscriptions' && request.method === 'POST') return registerChannels(request, env, identity, cors, ctx);
   if (url.pathname === '/v1/events' && request.method === 'GET') return eventsInbox(request, env, identity, cors);
   if (url.pathname === '/v1/account' && request.method === 'DELETE') return deleteAccount(env, identity, cors);
@@ -453,7 +502,10 @@ async function route(request: Request, env: Env, ctx: WorkerExecutionContext): P
 export default {
   async fetch(request: Request, env: Env, ctx: WorkerExecutionContext): Promise<Response> {
     try { return await route(request, env, ctx); }
-    catch (error) { return errorResponse(error instanceof Error ? error.message : 'Internal error', 500, corsHeaders(request, env) ?? undefined); }
+    catch (error) {
+      console.error('Request failed', new URL(request.url).pathname, error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error);
+      return errorResponse(error instanceof Error ? error.message : 'Internal error', 500, corsHeaders(request, env) ?? undefined);
+    }
   },
   async scheduled(_event: ScheduledEvent, env: Env, ctx: WorkerExecutionContext): Promise<void> { ctx.waitUntil(renewPending(env, 75)); }
 };

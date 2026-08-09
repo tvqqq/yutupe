@@ -1,6 +1,17 @@
 export type ContentType = 'video' | 'short' | 'live' | 'upcoming';
 export type ChannelStatus = 'active' | 'inactive' | 'unavailable' | 'unknown';
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type ChannelEnrichmentStatus = 'idle' | 'pending' | 'loading' | 'ready' | 'error';
+
+export interface ChannelEnrichment {
+  status: ChannelEnrichmentStatus;
+  priority?: boolean;
+  retryCount: number;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  nextRetryAt?: string;
+  error?: string;
+}
 
 export interface Group {
   id: string;
@@ -29,6 +40,7 @@ export interface Channel {
   subscribedAt?: string;
   uploadsPlaylistId?: string;
   description?: string;
+  enrichment?: ChannelEnrichment;
 }
 
 export interface Video {
@@ -76,6 +88,7 @@ export interface Settings {
   enrichmentTotal?: number;
   enrichmentStatus?: 'idle' | 'running' | 'complete';
   lastEnrichmentAt?: string;
+  enrichmentErrorCount?: number;
 }
 
 export interface AuthStatus {

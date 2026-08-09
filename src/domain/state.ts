@@ -3,6 +3,8 @@ import { PRODUCTION_CLOUD_API_BASE_URL } from '../config';
 
 export const STORAGE_KEY = 'youtube-collections-state-v1';
 export const MAX_CACHED_VIDEOS = 8_000;
+export const ENRICHMENT_STALE_MS = 24 * 60 * 60 * 1_000;
+export const ENRICHMENT_MAX_RETRIES = 3;
 
 export function nowIso(): string {
   return new Date().toISOString();
@@ -74,6 +76,36 @@ export function mergeDiscoveredChannels(items: Channel[], discovered: Channel[])
     });
   }
   return [...map.values()];
+}
+
+export function queueChannelsForEnrichment(state: AppState, priorityChannelIds: string[] = [], force = false, timestamp = Date.now()): AppState {
+  const priority = new Set(priorityChannelIds);
+  const channels = state.channels.map((channel) => {
+    if (!channel.uploadsPlaylistId) return { ...channel, enrichment: { ...channel.enrichment, status: 'ready' as const, retryCount: channel.enrichment?.retryCount ?? 0, priority: false, error: undefined, nextRetryAt: undefined } };
+    const lastSuccess = Date.parse(channel.enrichment?.lastSuccessAt ?? '');
+    const stale = force || !Number.isFinite(lastSuccess) || timestamp - lastSuccess >= ENRICHMENT_STALE_MS;
+    if (!stale) return channel;
+    return { ...channel, enrichment: { status: 'pending' as const, retryCount: 0, priority: priority.has(channel.id) || channel.enrichment?.priority, error: undefined, nextRetryAt: undefined } };
+  });
+  return withEnrichmentSummary({ ...state, channels });
+}
+
+export function withEnrichmentSummary(state: AppState): AppState {
+  const total = state.channels.length;
+  const retryable = state.channels.filter((channel) => channel.enrichment?.status === 'pending' || channel.enrichment?.status === 'loading' || (channel.enrichment?.status === 'error' && channel.enrichment.retryCount < ENRICHMENT_MAX_RETRIES)).length;
+  const errors = state.channels.filter((channel) => channel.enrichment?.status === 'error').length;
+  const settled = total - retryable;
+  return {
+    ...state,
+    settings: {
+      ...state.settings,
+      enrichmentCursor: settled,
+      enrichmentTotal: total,
+      enrichmentErrorCount: errors,
+      enrichmentStatus: retryable ? 'running' : total ? 'complete' : 'idle',
+      lastEnrichmentAt: !retryable && total ? nowIso() : state.settings.lastEnrichmentAt
+    }
+  };
 }
 
 export function mergeDiscoveredVideos(items: Video[], discovered: Video[]): Video[] {

@@ -6,6 +6,7 @@ import ContentApp from '@/src/youtube/ContentApp';
 import '@/src/ui/design-system.css';
 import '@/entrypoints/popup/style.css';
 import '@/src/youtube/content.css';
+import { EXTENSION_BRAND_CYAN, EXTENSION_ROUTE_HASH } from '@/src/config';
 
 const OPEN_EVENT = 'youtube-collections:open';
 
@@ -19,13 +20,20 @@ function installSidebarButton(): void {
   button.innerHTML = '<span aria-hidden="true">✦</span><span>YouTube Collections</span>';
   Object.assign(button.style, {
     width: 'calc(100% - 16px)', margin: '4px 8px', height: '40px', border: '0', borderRadius: '10px',
-    background: 'transparent', color: 'inherit', display: 'flex', alignItems: 'center', gap: '20px',
-    padding: '0 14px', font: '500 14px Roboto, Arial, sans-serif', cursor: 'pointer', textAlign: 'left'
+    background: 'rgba(34,211,238,.10)', color: EXTENSION_BRAND_CYAN, display: 'flex', alignItems: 'center', gap: '20px',
+    padding: '0 14px', font: '650 14px Roboto, Arial, sans-serif', cursor: 'pointer', textAlign: 'left'
   });
-  button.addEventListener('mouseenter', () => { button.style.background = 'rgba(127,127,127,.16)'; });
-  button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
+  button.addEventListener('mouseenter', () => { button.style.background = 'rgba(34,211,238,.18)'; });
+  button.addEventListener('mouseleave', () => { button.style.background = location.hash === EXTENSION_ROUTE_HASH ? 'rgba(34,211,238,.18)' : 'rgba(34,211,238,.10)'; });
   button.addEventListener('click', () => window.dispatchEvent(new CustomEvent(OPEN_EVENT)));
   target.prepend(button);
+}
+
+function syncSidebarButton(): void {
+  const button = document.getElementById('youtube-collections-guide-entry');
+  if (!button) return;
+  button.style.background = location.hash === EXTENSION_ROUTE_HASH ? 'rgba(34,211,238,.18)' : 'rgba(34,211,238,.10)';
+  button.setAttribute('aria-current', location.hash === EXTENSION_ROUTE_HASH ? 'page' : 'false');
 }
 
 export default defineContentScript({
@@ -55,6 +63,7 @@ export default defineContentScript({
     let timer: number | undefined;
     const discover = async () => {
       installSidebarButton();
+      syncSidebarButton();
       const payload = scanYouTubePage();
       if (payload.videos.length) await sendMessage({ type: 'DISCOVER', payload });
     };
@@ -66,6 +75,9 @@ export default defineContentScript({
     observer.observe(document.documentElement, { childList: true, subtree: true });
     ctx.onInvalidated(() => { observer.disconnect(); if (timer) clearTimeout(timer); });
     schedule();
+    window.addEventListener('hashchange', syncSidebarButton);
+    window.addEventListener('popstate', syncSidebarButton);
+    window.addEventListener('youtube-collections:route-change', syncSidebarButton);
 
     document.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href*="watch?v="], a[href^="/shorts/"]') : null;
@@ -74,5 +86,10 @@ export default defineContentScript({
       const videoId = url.searchParams.get('v') ?? (url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : undefined);
       if (videoId) void sendMessage({ type: 'MARK_WATCHED', payload: { videoId, watched: true } });
     }, true);
+    ctx.onInvalidated(() => {
+      window.removeEventListener('hashchange', syncSidebarButton);
+      window.removeEventListener('popstate', syncSidebarButton);
+      window.removeEventListener('youtube-collections:route-change', syncSidebarButton);
+    });
   }
 });

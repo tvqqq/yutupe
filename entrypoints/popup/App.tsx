@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Bell, Check, Download, FolderKanban, LayoutGrid, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
+import { Bell, Check, CircleAlert, Download, FolderKanban, GripVertical, LayoutGrid, Pencil, Plus, RefreshCw, Settings as SettingsIcon, Sparkles, Trash2, Upload, Users, X, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppMessage, AppResponse } from '@/src/domain/messages';
 import { groupChannelCount } from '@/src/domain/state';
@@ -29,6 +29,9 @@ function SuggestionsPage({ state, act }: { state: AppState; act: (message: AppMe
   const [activeQuery, setActiveQuery] = useState('');
   const [videos, setVideos] = useState<Video[]>([]);
   const [busy, setBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [recommendations, setRecommendations] = useState<Array<{ channelId: string; reason: string; confidence: number }>>([]);
   const load = (value?: string) => {
     setBusy(true);
     void act({ type: 'FETCH_SUGGESTIONS', payload: { query: value?.trim() || undefined } }).then((response) => {
@@ -38,10 +41,23 @@ function SuggestionsPage({ state, act }: { state: AppState; act: (message: AppMe
   };
   useEffect(() => { load(); }, []);
   const topics = state.groups.slice().sort((a, b) => b.channelIds.length - a.channelIds.length).slice(0, 8).map((group) => group.name);
-  return <section className="page suggestions-page"><div className="section-title"><div><h1>Trending dành cho bạn</h1><p>Video phổ biến gần đây dựa trên groups, lịch sử xem local hoặc chủ đề bạn nhập.</p></div></div><form className="suggest-search" onSubmit={(event) => { event.preventDefault(); load(query); }}><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Bạn muốn xem nội dung gì?" /><button className="primary" disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm video trending'}</button></form>{topics.length > 0 && <div className="suggest-topics">{topics.map((topic) => <button className="chip" key={topic} onClick={() => { setQuery(topic); load(topic); }}>{topic}</button>)}</div>}<div className="feed-heading"><span>Chủ đề: <strong>{activeQuery || 'đang phân tích…'}</strong></span><span>{videos.length} video</span></div>{!videos.length ? <EmptyState title={busy ? 'Đang tìm video phù hợp…' : 'Chưa có gợi ý'} detail="Nhập một chủ đề hoặc tạo Groups để cá nhân hoá kết quả." /> : <div className="video-grid">{videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div>}</section>;
+  const rejectedVideos = state.videos.filter((video) => state.videoStates[video.id]?.hiddenAt).sort((a, b) => Date.parse(state.videoStates[b.id]?.hiddenAt ?? '') - Date.parse(state.videoStates[a.id]?.hiddenAt ?? ''));
+  const rejectionStats = state.channels.map((channel) => { const cached = state.videos.filter((video) => video.channelId === channel.id); return { channel, cachedCount: cached.length, rejectedCount: cached.filter((video) => state.videoStates[video.id]?.hiddenAt).length }; }).filter((item) => item.rejectedCount >= 2).sort((a, b) => b.rejectedCount - a.rejectedCount);
+  const analyze = async () => {
+    setAiBusy(true); setAiError('');
+    try { const response = await act({ type: 'AI_UNSUBSCRIBE_SUGGESTIONS', payload: { channelIds: rejectionStats.map((item) => item.channel.id) } }) as AppResponse; setRecommendations(((response.data as { recommendations?: typeof recommendations })?.recommendations ?? [])); }
+    catch (value) { setAiError(value instanceof Error ? value.message : 'Không thể phân tích feedback bằng AI.'); }
+    finally { setAiBusy(false); }
+  };
+  return <section className="page suggestions-page">
+    <div className="suggestions-hero"><div><span><Sparkles size={14} /> PERSONALIZATION LAB</span><h1>Gợi ý</h1><p>Khám phá nội dung mới và quản lý những tín hiệu “Không xem” mà bạn đã gửi.</p></div><div><strong>{rejectedVideos.length}</strong><small>negative signals</small></div></div>
+    <section className="feedback-panel"><header><div><span className="feedback-icon"><Sparkles size={18} /></span><div><h2>AI unsubscribe advisor</h2><p>AI phân tích các channel có nhiều video bị đánh dấu Không xem. Extension không tự unsubscribe.</p></div></div><button className="secondary" disabled={aiBusy || !rejectionStats.length} onClick={() => void analyze()}>{aiBusy ? <RefreshCw className="spin" size={16} /> : <Sparkles size={16} />}{aiBusy ? 'Đang phân tích…' : 'Phân tích bằng AI'}</button></header>{aiError && <p className="integration-notice">{aiError}</p>}{!rejectionStats.length ? <p className="feedback-empty">Cần ít nhất 2 video “Không xem” từ cùng một channel để bắt đầu phân tích.</p> : <div className="unsubscribe-grid">{rejectionStats.map(({ channel, rejectedCount, cachedCount }) => { const result = recommendations.find((item) => item.channelId === channel.id); return <article key={channel.id}><div className="unsubscribe-channel">{channel.thumbnailUrl ? <img src={channel.thumbnailUrl} alt="" /> : <span>{channel.title[0]}</span>}<div><strong>{channel.title}</strong><small>{rejectedCount}/{cachedCount} video đã chọn Không xem</small></div></div>{result ? <p>{result.reason}<span>{Math.round(result.confidence * 100)}% confidence</span></p> : <p className="muted-copy">Chờ AI đánh giá mức độ phù hợp.</p>}<button className="danger-button small" disabled={!result || !channel.subscriptionId} onClick={() => confirm(`UNSUBSCRIBE thật channel “${channel.title}” trên YouTube?`) && void act({ type: 'UNSUBSCRIBE_CHANNELS', payload: { channelIds: [channel.id] } }).catch((error) => alert(error instanceof Error ? error.message : 'Unsubscribe thất bại'))}><Trash2 size={14} />Unsubscribe</button></article>; })}</div>}</section>
+    <section className="rejected-panel"><div className="feed-heading"><span><strong>Đã chọn Không xem</strong> · dùng làm tín hiệu cá nhân hóa</span><span>{rejectedVideos.length} video</span></div>{rejectedVideos.length ? <div className="rejected-video-list">{rejectedVideos.slice(0, 30).map((video) => <article key={video.id}>{video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span /> }<div><strong>{video.title}</strong><small>{video.channelTitle}</small></div><button className="secondary small" onClick={() => void act({ type: 'HIDE_VIDEO', payload: { videoId: video.id, hidden: false } })}>Hoàn tác</button></article>)}</div> : <EmptyState title="Chưa có negative feedback" detail="Bấm “Không xem” trên video ở Feed để lưu tín hiệu tại đây." />}</section>
+    <div className="section-title"><div><h1>Trending dành cho bạn</h1><p>Video phổ biến gần đây dựa trên groups, lịch sử xem local hoặc chủ đề bạn nhập.</p></div></div><form className="suggest-search" onSubmit={(event) => { event.preventDefault(); load(query); }}><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Bạn muốn xem nội dung gì?" /><button className="primary" disabled={busy}>{busy ? 'Đang tìm…' : 'Tìm video trending'}</button></form>{topics.length > 0 && <div className="suggest-topics">{topics.map((topic) => <button className="chip" key={topic} onClick={() => { setQuery(topic); load(topic); }}>{topic}</button>)}</div>}<div className="feed-heading"><span>Chủ đề: <strong>{activeQuery || 'đang phân tích…'}</strong></span><span>{videos.length} video</span></div>{!videos.length ? <EmptyState title={busy ? 'Đang tìm video phù hợp…' : 'Chưa có gợi ý'} detail="Nhập một chủ đề hoặc tạo Groups để cá nhân hoá kết quả." /> : <div className="video-grid">{videos.map((video) => <VideoCard key={video.id} video={video} watched={Boolean(state.videoStates[video.id]?.watchedAt)} onAction={(message) => void act(message)} />)}</div>}
+  </section>;
 }
 
-function GroupForm({ group, channels, onClose, act }: { group?: Group; channels: Channel[]; onClose: () => void; act: (message: AppMessage) => Promise<unknown> }) {
+function GroupForm({ group, channels, onClose, onSaved, act }: { group?: Group; channels: Channel[]; onClose: () => void; onSaved: (message: string) => void; act: (message: AppMessage) => Promise<unknown> }) {
   const [name, setName] = useState(group?.name ?? '');
   const [icon, setIcon] = useState(group?.icon ?? '📁');
   const [color, setColor] = useState(group?.color ?? COLORS[0]!);
@@ -49,6 +65,7 @@ function GroupForm({ group, channels, onClose, act }: { group?: Group; channels:
   const [channelIds, setChannelIds] = useState<Set<string>>(new Set(group?.channelIds ?? []));
   const [channelQuery, setChannelQuery] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const pickFile = (file?: File) => {
     if (!file) return;
     if (!file.type.startsWith('image/') || file.size > 200_000) return setError('Icon phải là ảnh nhỏ hơn 200 KB.');
@@ -58,31 +75,69 @@ function GroupForm({ group, channels, onClose, act }: { group?: Group; channels:
   };
   const save = async () => {
     if (!name.trim()) return setError('Hãy nhập tên group.');
-    await act({ type: 'UPSERT_GROUP', payload: { ...group, name, icon, color, iconDataUrl, channelIds: [...channelIds] } });
-    onClose();
+    setSaving(true); setError('');
+    try {
+      await act({ type: 'UPSERT_GROUP', payload: { ...group, name, icon, color, iconDataUrl, channelIds: [...channelIds] } });
+      onSaved(group ? `Đã cập nhật “${name.trim()}”.` : `Đã tạo group “${name.trim()}”.`);
+      onClose();
+    } catch (value) { setError(value instanceof Error ? value.message : 'Không thể lưu group.'); }
+    finally { setSaving(false); }
   };
-  return <div className="modal-backdrop"><section className="modal">
-    <div className="section-title"><div><h2>{group ? 'Sửa group' : 'Tạo group'}</h2><p>Một channel có thể thuộc nhiều group.</p></div><button className="ghost" onClick={onClose}>Đóng</button></div>
+  return <div className="modal-backdrop"><section className="modal group-modal" aria-busy={saving}>
+    <div className="group-modal-kicker"><Sparkles size={14} /> COLLECTION CONFIG</div>
+    <div className="section-title"><div><h2>{group ? 'Sửa group' : 'Tạo group'}</h2><p>Một channel có thể thuộc nhiều group.</p></div><button className="ghost" disabled={saving} onClick={onClose}>Đóng</button></div>
     <label className="form-label">Tên group<input className="field" autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Ví dụ: Tech & AI" /></label>
     <div className="form-label">Icon<div className="icon-picker">{ICONS.map((item) => <button key={item} className={icon === item && !iconDataUrl ? 'selected' : ''} onClick={() => { setIcon(item); setIconDataUrl(undefined); }}>{item}</button>)}<label className="upload-icon">{iconDataUrl ? <img src={iconDataUrl} alt="Custom icon" /> : <Upload size={17} />}<input type="file" accept="image/*" onChange={(event) => pickFile(event.target.files?.[0])} /></label></div></div>
     <div className="form-label">Màu<div className="color-picker">{COLORS.map((item) => <button key={item} className={color === item ? 'selected' : ''} style={{ background: item }} onClick={() => setColor(item)} aria-label={`Màu ${item}`} />)}</div></div>
     <div className="form-label group-channel-manager">Channels ({channelIds.size})<input className="field" value={channelQuery} onChange={(event) => setChannelQuery(event.target.value)} placeholder="Tìm channel để thêm hoặc xoá khỏi group…" /><div className="group-channel-list">{channels.filter((channel) => channel.title.toLocaleLowerCase().includes(channelQuery.toLocaleLowerCase())).map((channel) => <label key={channel.id}><input type="checkbox" checked={channelIds.has(channel.id)} onChange={() => setChannelIds((current) => { const next = new Set(current); next.has(channel.id) ? next.delete(channel.id) : next.add(channel.id); return next; })} />{channel.thumbnailUrl ? <img src={channel.thumbnailUrl} alt="" /> : <span>{channel.title[0]}</span>}<strong>{channel.title}</strong></label>)}</div></div>
     {error && <p className="error-text">{error}</p>}
-    <div className="modal-actions"><button className="secondary" onClick={onClose}>Hủy</button><button className="primary" onClick={() => void save()}><Check size={16} />Lưu group</button></div>
+    {saving && <div className="group-save-pending"><RefreshCw className="spin" size={16} /><span><strong>Đang lưu group…</strong><small>Group được lưu ngay; video của các channel sẽ tự cập nhật sau.</small></span></div>}
+    <div className="modal-actions"><button className="secondary" disabled={saving} onClick={onClose}>Hủy</button><button className="primary" disabled={saving || !name.trim()} onClick={() => void save()}>{saving ? <RefreshCw className="spin" size={16} /> : <Check size={16} />}{saving ? 'Đang lưu…' : 'Lưu group'}</button></div>
   </section></div>;
 }
 
 function GroupsPage({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const [editing, setEditing] = useState<Group | 'new' | null>(null);
+  const [pending, setPending] = useState('');
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [sorting, setSorting] = useState(false);
+  const [draftOrder, setDraftOrder] = useState<string[]>([]);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
   const orderedGroups = state.groups.slice().sort((a, b) => a.position - b.position);
-  return <section className="page">
-    <div className="section-title"><div><h1>Groups</h1><p>Tổ chức subscription thành các bộ sưu tập theo chủ đề.</p></div><button className="primary" onClick={() => setEditing('new')}><Plus size={16} />Tạo group</button></div>
-    {!orderedGroups.length ? <EmptyState title="Chưa có group" detail="Tạo group đầu tiên, sau đó mở Channels để thêm kênh." /> : <div className="group-grid">{orderedGroups.map((group, index) => <article className="group-card" key={group.id}>
-      <GroupIcon group={group} size={42} /><div className="group-card-body"><strong>{group.name}</strong><span>{groupChannelCount(group, state.channels)} channels</span></div>
-      <label className="switch-row"><Bell size={14} />Thông báo<input type="checkbox" checked={group.notifications} onChange={() => void act({ type: 'UPSERT_GROUP', payload: { ...group, notifications: !group.notifications } })} /></label>
-      <div className="group-card-actions"><div className="group-priority"><button className="ghost small" disabled={index === 0} title="Ưu tiên hiển thị trước" onClick={() => void act({ type: 'REORDER_GROUP', payload: { groupId: group.id, direction: 'up' } })}><ArrowUp size={15} /></button><button className="ghost small" disabled={index === orderedGroups.length - 1} title="Chuyển xuống sau" onClick={() => void act({ type: 'REORDER_GROUP', payload: { groupId: group.id, direction: 'down' } })}><ArrowDown size={15} /></button><span>Ưu tiên {index + 1}</span></div><button className="secondary small" onClick={() => setEditing(group)}>Chỉnh sửa</button><button className="ghost danger-text" title="Xóa group" onClick={() => confirm(`Xóa group “${group.name}”?`) && void act({ type: 'DELETE_GROUP', payload: { groupId: group.id } })}><Trash2 size={15} /></button></div>
-    </article>)}</div>}
-    {editing && <GroupForm group={editing === 'new' ? undefined : editing} channels={state.channels} act={act} onClose={() => setEditing(null)} />}
+  const visibleGroups = sorting ? draftOrder.map((id) => orderedGroups.find((group) => group.id === id)).filter((group): group is Group => Boolean(group)) : orderedGroups;
+  const run = async (key: string, message: AppMessage, success: string) => {
+    setPending(key); setNotice(null);
+    try { await act(message); setNotice({ type: 'success', text: success }); }
+    catch (value) { setNotice({ type: 'error', text: value instanceof Error ? value.message : 'Thao tác group thất bại.' }); }
+    finally { setPending(''); }
+  };
+  const saved = (text: string) => setNotice({ type: 'success', text });
+  const startSorting = () => { setDraftOrder(orderedGroups.map((group) => group.id)); setSorting(true); setNotice(null); };
+  const moveBefore = (targetId: string) => {
+    if (!draggedId || draggedId === targetId) return;
+    setDraftOrder((current) => { const next = current.filter((id) => id !== draggedId); next.splice(next.indexOf(targetId), 0, draggedId); return next; });
+  };
+  const saveOrder = async () => {
+    setPending('sorting'); setNotice(null);
+    try { await act({ type: 'REORDER_GROUPS', payload: { groupIds: draftOrder } }); setSorting(false); setNotice({ type: 'success', text: 'Đã cập nhật thứ tự Groups trên Feed navbar.' }); }
+    catch (value) { setNotice({ type: 'error', text: value instanceof Error ? value.message : 'Không thể lưu thứ tự groups.' }); }
+    finally { setPending(''); setDraggedId(null); }
+  };
+  return <section className="page groups-page">
+    <div className="groups-hero"><div><span className="groups-eyebrow"><Sparkles size={14} /> SUBSCRIPTION COLLECTIONS</span><h1>Groups</h1><p>Sắp xếp kênh theo chủ đề và quyết định thứ tự xuất hiện trên Feed navbar.</p></div><div className="groups-hero-actions"><span><strong>{orderedGroups.length}</strong><small>groups</small></span><span><strong>{state.channels.length}</strong><small>channels</small></span>{sorting ? <div className="sorting-actions"><button className="secondary" disabled={Boolean(pending)} onClick={() => { setSorting(false); setDraggedId(null); }}>Hủy</button><button className="primary" disabled={Boolean(pending)} onClick={() => void saveOrder()}>{pending === 'sorting' ? <RefreshCw className="spin" size={16} /> : <Check size={16} />}{pending === 'sorting' ? 'Đang lưu…' : 'Lưu thứ tự'}</button></div> : <><button className="secondary" disabled={Boolean(pending) || orderedGroups.length < 2} onClick={startSorting}><GripVertical size={16} />Sắp xếp</button><button className="primary" disabled={Boolean(pending)} onClick={() => setEditing('new')}><Plus size={16} />Tạo group</button></>}</div></div>
+    {sorting && <div className="sorting-hint"><GripVertical size={17} /><span><strong>Chế độ sắp xếp đang bật</strong>Kéo thả cards bằng handle, sau đó bấm “Lưu thứ tự”.</span></div>}
+    {notice && <div className={`group-notice ${notice.type}`} role="status">{notice.type === 'success' ? <Check size={16} /> : <X size={16} />}<span>{notice.text}</span><button className="ghost small" onClick={() => setNotice(null)}><X size={14} /></button></div>}
+    {!orderedGroups.length ? <EmptyState title="Chưa có group" detail="Tạo group đầu tiên, sau đó mở Channels để thêm kênh." /> : <div className={`group-grid${sorting ? ' sorting' : ''}`}>{visibleGroups.map((group, index) => {
+      const cardPending = pending.startsWith(`${group.id}:`);
+      return <article className={`group-card${cardPending ? ' pending' : ''}${draggedId === group.id ? ' dragging' : ''}`} style={{ '--group-color': group.color } as React.CSSProperties} key={group.id} aria-busy={cardPending} draggable={sorting} onDragStart={(event) => { if (!sorting) return; setDraggedId(group.id); event.dataTransfer.effectAllowed = 'move'; }} onDragOver={(event) => { if (sorting) { event.preventDefault(); moveBefore(group.id); } }} onDragEnd={() => setDraggedId(null)}>
+        <div className="group-card-accent" /><div className="group-card-head"><span className="group-rank">#{String(index + 1).padStart(2, '0')}</span>{sorting && <span className="group-drag-handle" title="Kéo để sắp xếp"><GripVertical size={18} /></span>}</div>
+        <div className="group-card-main"><GroupIcon group={group} size={46} /><div className="group-card-body"><strong>{group.name}</strong><span>{groupChannelCount(group, state.channels)} channels trong collection</span></div></div>
+        <button className={`group-notification${group.notifications ? ' active' : ''}`} role="switch" aria-checked={group.notifications} disabled={Boolean(pending) || sorting} onClick={() => void run(`${group.id}:notification`, { type: 'UPSERT_GROUP', payload: { ...group, notifications: !group.notifications } }, `${group.notifications ? 'Đã tắt' : 'Đã bật'} thông báo cho “${group.name}”.`)}><Bell size={15} /><span><strong>Thông báo</strong><small>{group.notifications ? 'Đang bật cho video mới' : 'Đang tắt'}</small></span><i /></button>
+        <div className="group-card-actions"><span className="group-position">Vị trí {index + 1}</span><div><button className="secondary icon-button" disabled={Boolean(pending) || sorting} title={`Chỉnh sửa ${group.name}`} aria-label={`Chỉnh sửa ${group.name}`} onClick={() => setEditing(group)}><Pencil size={15} /></button><button className="ghost danger-text icon-button" disabled={Boolean(pending) || sorting} title="Xóa group" onClick={() => confirm(`Xóa group “${group.name}”?`) && void run(`${group.id}:delete`, { type: 'DELETE_GROUP', payload: { groupId: group.id } }, `Đã xóa group “${group.name}”.`)}><Trash2 size={15} /></button></div></div>
+        {cardPending && <div className="group-card-pending"><RefreshCw className="spin" size={18} /><span>Đang xử lý…</span></div>}
+      </article>;
+    })}</div>}
+    {editing && <GroupForm group={editing === 'new' ? undefined : editing} channels={state.channels} act={act} onSaved={saved} onClose={() => setEditing(null)} />}
   </section>;
 }
 
@@ -94,7 +149,7 @@ function ChannelRow({ channel, state, act, selected, onSelect }: { channel: Chan
   };
   const subscribed = channel.subscribedAt ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium' }).format(new Date(channel.subscribedAt)) : 'Không rõ ngày';
   const subscribers = channel.subscriberCount === undefined ? 'Ẩn số người đăng ký' : `${Intl.NumberFormat('vi-VN', { notation: 'compact', maximumFractionDigits: 1 }).format(channel.subscriberCount)} người đăng ký`;
-  const latestVideo = channel.lastPublishedAt ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(channel.lastPublishedAt)) : 'Chưa tải feed';
+  const latestVideo = channel.lastPublishedAt ? new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(channel.lastPublishedAt)) : channel.enrichment?.status === 'loading' ? 'Đang cập nhật…' : channel.enrichment?.status === 'error' ? 'Cập nhật lỗi' : 'Chưa tải feed';
   const assignedNames = state.groups.filter((group) => assigned.includes(group.id)).map((group) => group.name);
   return <article className="channel-row">
     <input aria-label={`Chọn ${channel.title}`} type="checkbox" checked={selected} onChange={onSelect} />
@@ -107,18 +162,30 @@ function ChannelRow({ channel, state, act, selected, onSelect }: { channel: Chan
 
 function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'az' | 'recent' | 'latest-video'>('az');
+  const [sort, setSort] = useState<'subscribers' | 'az' | 'recent' | 'latest-video'>('subscribers');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const enrichmentTotal = state.settings.enrichmentTotal ?? 0;
   const enrichmentCursor = Math.min(state.settings.enrichmentCursor ?? 0, enrichmentTotal);
   const enrichmentPercent = enrichmentTotal ? Math.round(enrichmentCursor / enrichmentTotal * 100) : 100;
-  const channels = useMemo(() => state.channels.filter((channel) => channel.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => sort === 'az' ? a.title.localeCompare(b.title) : sort === 'latest-video' ? Date.parse(b.lastPublishedAt ?? '1970-01-01') - Date.parse(a.lastPublishedAt ?? '1970-01-01') : Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)), [state.channels, query, sort]);
+  const enrichmentErrors = state.settings.enrichmentErrorCount ?? 0;
+  const channels = useMemo(() => state.channels.filter((channel) => channel.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => sort === 'subscribers' ? (b.subscriberCount ?? -1) - (a.subscriberCount ?? -1) || a.title.localeCompare(b.title) : sort === 'az' ? a.title.localeCompare(b.title) : sort === 'latest-video' ? Date.parse(b.lastPublishedAt ?? '1970-01-01') - Date.parse(a.lastPublishedAt ?? '1970-01-01') : Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)), [state.channels, query, sort]);
+  const runAction = async (key: string, message: AppMessage, success: string) => {
+    setBusy(key); setActionNotice(null);
+    try { await act(message); setActionNotice({ type: 'success', text: success }); return true; }
+    catch (value) { setActionNotice({ type: 'error', text: value instanceof Error ? value.message : 'Thao tác thất bại.' }); return false; }
+    finally { setBusy(''); }
+  };
   return <section className="page">
-    <div className="section-title"><div><h1>Channels</h1><p>Quản lý subscriptions, thông tin channel và gán nhiều group.</p></div><div className="channel-actions"><button className="secondary small" disabled={busy} onClick={() => { setBusy(true); void act({ type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' }).catch((error) => alert(error instanceof Error ? error.message : 'Sync thất bại')).finally(() => setBusy(false)); }}><RefreshCw size={14} />Sync YouTube</button><button className="secondary small" disabled={busy} onClick={() => { setBusy(true); void act({ type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } }).catch((error) => alert(error instanceof Error ? error.message : 'Refresh thất bại')).finally(() => setBusy(false)); }}>Refresh feed</button>{selected.size > 0 && <button className="danger-button small" disabled={busy} onClick={() => { const names = state.channels.filter((item) => selected.has(item.id)).map((item) => item.title); if (!confirm(`UNSUBSCRIBE thật ${names.length} channel trên YouTube?\n\n${names.join('\n')}`)) return; setBusy(true); void act({ type: 'UNSUBSCRIBE_CHANNELS', payload: { channelIds: [...selected] } }).then(() => setSelected(new Set())).catch((error) => alert(error instanceof Error ? error.message : 'Unsubscribe thất bại')).finally(() => setBusy(false)); }}><Trash2 size={14} />Unsubscribe {selected.size}</button>}</div></div>
-    {state.settings.enrichmentStatus === 'running' && <div className="enrichment-progress"><div><RefreshCw className="spin" size={16} /><span><strong>Subscriptions đã sẵn sàng</strong><small>Đang bổ sung video mới nhất trong nền: {enrichmentCursor}/{enrichmentTotal} channels</small></span></div><div><span style={{ width: `${enrichmentPercent}%` }} /></div></div>}
-    <div className="ai-organize"><div><Sparkles size={18} /><span><strong>AI Groups</strong><small>{state.settings.cloudApiBaseUrl ? 'Dùng AI cloud để tạo và phân loại groups.' : 'Chưa có Cloud API: dùng Smart Groups local, không cần cấu hình thêm.'}</small></span></div><button className="secondary" disabled={busy || !state.channels.length} onClick={() => { setBusy(true); void act({ type: 'AI_ORGANIZE_CHANNELS' }).catch((error) => alert(error instanceof Error ? error.message : 'Phân loại groups thất bại')).finally(() => setBusy(false)); }}><Sparkles size={15} />{state.settings.cloudApiBaseUrl ? 'Tạo groups bằng AI' : 'Tạo Smart Groups'}</button></div>
-    <div className="channel-toolbar"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm channel…" /><select value={sort} onChange={(event) => setSort(event.target.value as 'az' | 'recent' | 'latest-video')}><option value="az">A–Z</option><option value="latest-video">Video hoạt động gần đây</option><option value="recent">Phát hiện gần đây</option></select></div>
+    <div className="section-title"><div><h1>Channels</h1><p>Quản lý subscriptions, thông tin channel và gán nhiều group.</p></div><div className="channel-actions"><button className="secondary small" disabled={Boolean(busy)} title="Tải lại danh sách channel bạn đang subscribe và metadata cơ bản" onClick={() => void runAction('sync', { type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' }, 'Danh sách subscriptions đã được cập nhật; metadata video tiếp tục chạy nền.')}><RefreshCw className={busy === 'sync' ? 'spin' : ''} size={14} />{busy === 'sync' ? 'Đang đồng bộ…' : 'Cập nhật subscriptions'}</button><button className="secondary small" disabled={Boolean(busy)} title="Tải video mới từ các uploads playlist, không thay đổi danh sách subscriptions" onClick={() => void runAction('feed', { type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } }, 'Feed video mới đã được cập nhật.')}><RefreshCw className={busy === 'feed' ? 'spin' : ''} size={14} />{busy === 'feed' ? 'Đang tải video…' : 'Cập nhật Feed'}</button>{selected.size > 0 && <button className="danger-button small" disabled={Boolean(busy)} onClick={() => { const names = state.channels.filter((item) => selected.has(item.id)).map((item) => item.title); if (!confirm(`UNSUBSCRIBE thật ${names.length} channel trên YouTube?\n\n${names.join('\n')}`)) return; void runAction('unsubscribe', { type: 'UNSUBSCRIBE_CHANNELS', payload: { channelIds: [...selected] } }, `Đã unsubscribe ${selected.size} channel.`).then(() => setSelected(new Set())); }}><Trash2 size={14} />{busy === 'unsubscribe' ? 'Đang unsubscribe…' : `Unsubscribe ${selected.size}`}</button>}</div></div>
+    <div className="channel-sync-guide"><div><strong>1 · Cập nhật subscriptions</strong><span>Dùng khi vừa subscribe/unsubscribe trên YouTube. Danh sách channel hiện ra trước, metadata bổ sung chạy nền.</span></div><div><strong>2 · Cập nhật Feed</strong><span>Dùng để lấy video mới của các channel đã có. Không tải lại danh sách subscriptions.</span></div></div>
+    {busy && <div className="channel-action-loading" role="status"><RefreshCw className="spin" size={17} /><span><strong>{busy === 'sync' ? 'Đang đọc subscriptions từ YouTube…' : busy === 'feed' ? 'Đang tải video mới từ uploads playlists…' : busy === 'ai' ? 'AI đang phân loại channels…' : 'Đang xử lý yêu cầu…'}</strong><small>Tác vụ có thể mất một lúc với tài khoản có nhiều channel. Bạn có thể tiếp tục xem trạng thái tại đây.</small></span></div>}
+    {actionNotice && <div className={`channel-action-notice ${actionNotice.type}`}><span>{actionNotice.text}</span><button className="ghost small" onClick={() => setActionNotice(null)}><X size={14} /></button></div>}
+    {state.settings.enrichmentStatus === 'running' && <div className="enrichment-progress"><div className="enrichment-copy"><RefreshCw className="spin" size={16} /><span><strong>Subscriptions đã sẵn sàng — Groups dùng được ngay</strong><small>Video mới nhất đang được bổ sung theo độ ưu tiên: {enrichmentCursor}/{enrichmentTotal} channels{enrichmentErrors ? ` · ${enrichmentErrors} đang retry` : ''}</small></span></div><div className="enrichment-bar"><span style={{ width: `${enrichmentPercent}%` }} /></div></div>}
+    {state.settings.enrichmentStatus === 'complete' && enrichmentErrors > 0 && <div className="enrichment-warning"><span className="enrichment-warning-icon"><CircleAlert size={18} /></span><div><strong>Một số channel chưa cập nhật được metadata</strong><small>Feed và Groups vẫn dùng bình thường. Extension sẽ thử lại ở lần cập nhật subscriptions tiếp theo.</small></div><div className="enrichment-error-count"><strong>{enrichmentErrors}</strong><span>channel lỗi</span></div></div>}
+    <div className="ai-organize"><div><Sparkles size={18} /><span><strong>AI Groups</strong><small>{state.settings.cloudApiBaseUrl ? 'Dùng AI cloud để tạo và phân loại groups.' : 'Chưa có Cloud API: dùng Smart Groups local, không cần cấu hình thêm.'}</small></span></div><button className="secondary" disabled={Boolean(busy) || !state.channels.length} onClick={() => void runAction('ai', { type: 'AI_ORGANIZE_CHANNELS' }, 'AI đã hoàn tất phân loại groups.')}><Sparkles size={15} />{busy === 'ai' ? 'Đang phân loại…' : state.settings.cloudApiBaseUrl ? 'Tạo groups bằng AI' : 'Tạo Smart Groups'}</button></div>
+    <div className="channel-toolbar"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm channel…" /><select value={sort} onChange={(event) => setSort(event.target.value as 'subscribers' | 'az' | 'recent' | 'latest-video')}><option value="subscribers">Nhiều người đăng ký nhất</option><option value="az">A–Z</option><option value="latest-video">Video hoạt động gần đây</option><option value="recent">Phát hiện gần đây</option></select></div>
     {!channels.length ? <EmptyState title="Chưa tìm thấy channel" detail="Kết nối Google rồi bấm Sync YouTube, hoặc cuộn trang YouTube để thu thập local." /> : <div className="channel-list">{channels.map((channel) => <ChannelRow key={channel.id} channel={channel} state={state} act={act} selected={selected.has(channel.id)} onSelect={() => setSelected((current) => { const next = new Set(current); if (next.has(channel.id)) next.delete(channel.id); else next.add(channel.id); return next; })} />)}</div>}
   </section>;
 }
@@ -138,9 +205,13 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       const response = await act(message) as AppResponse;
       if (response.authStatus) setAuth(response.authStatus);
       if (message.type === 'CONNECT_GOOGLE' && response.authStatus?.connected) await act({ type: 'CHECK_CLOUD_STATUS' });
-      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; registered?: number; queued?: number; permissionGranted?: boolean; status?: { activeSubscriptions?: number; pendingSubscriptions?: number } } | undefined;
+      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; registered?: number; queued?: number; permissionGranted?: boolean; fileId?: string; syncedAt?: string; restoredFrom?: string; status?: { activeSubscriptions?: number; pendingSubscriptions?: number } } | undefined;
       const skipped = feedReport?.skippedChannels ?? [];
-      setNotice(feedReport?.granted
+      setNotice(feedReport?.restoredFrom
+        ? `Đã khôi phục backup tạo lúc ${new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(feedReport.restoredFrom))}.`
+        : feedReport?.fileId
+          ? `Đã backup lên vùng dữ liệu riêng của ứng dụng trên Google Drive lúc ${new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(feedReport.syncedAt ?? Date.now()))}.`
+          : feedReport?.granted
         ? 'Cloud API production đã được xác minh và health check thành công.'
         : feedReport?.permissionGranted === false
           ? 'Origin Cloud chưa có trong manifest. Hãy reload bản extension production mới nhất.'
@@ -179,8 +250,8 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       {!auth.connected ? <button className="primary" disabled={Boolean(busy) || !hasGoogleClientId} onClick={() => void run('Kết nối Google', { type: 'CONNECT_GOOGLE' })}>{busy === 'Kết nối Google' ? <><RefreshCw className="spin" size={16} />Đang kết nối Google…</> : 'Kết nối Google'}</button> : <button className="secondary" disabled={Boolean(busy)} onClick={() => void run('Ngắt kết nối', { type: 'DISCONNECT_GOOGLE' })}>Ngắt kết nối</button>}
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Sync subscriptions', { type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' })}>Sync subscriptions</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Refresh API feed', { type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } })}>Refresh feed</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Drive backup', { type: 'DRIVE_PUSH' })}>Push Drive</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => confirm('Pull Drive sẽ thay thế groups, channel assignments và watched state hiện tại. Tiếp tục?') && void run('Drive restore', { type: 'DRIVE_PULL' })}>Pull Drive</button>
+      <button className="secondary" disabled={Boolean(busy) || !auth.connected} title="Ghi đè backup mới nhất trong vùng dữ liệu riêng của ứng dụng trên Google Drive" onClick={() => void run('Backup lên Drive', { type: 'DRIVE_PUSH' })}>{busy === 'Backup lên Drive' ? <><RefreshCw className="spin" size={16} />Đang backup…</> : 'Backup lên Drive'}</button>
+      <button className="secondary" disabled={Boolean(busy) || !auth.connected} title="Khôi phục groups, channel assignments, watched state và một số tùy chọn từ backup mới nhất" onClick={() => confirm('Khôi phục từ Drive sẽ thay thế groups, channel assignments và watched state hiện tại. Tiếp tục?') && void run('Khôi phục từ Drive', { type: 'DRIVE_PULL' })}>{busy === 'Khôi phục từ Drive' ? <><RefreshCw className="spin" size={16} />Đang khôi phục…</> : 'Khôi phục từ Drive'}</button>
       <button className="secondary" disabled={Boolean(busy) || !hasCloudUrl} onClick={() => void run('Cloud permission', { type: 'GRANT_CLOUD_PERMISSION', payload: { baseUrl: state.settings.cloudApiBaseUrl } })}>Xác minh Cloud API</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud status', { type: 'CHECK_CLOUD_STATUS' })}>Kiểm tra Cloud</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady || !state.channels.length} onClick={() => void run('WebSub registration', { type: 'REGISTER_WEBSUB' })}>Đăng ký WebSub</button>

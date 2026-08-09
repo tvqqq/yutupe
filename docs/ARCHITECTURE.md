@@ -72,7 +72,18 @@ Drive pull hiện dùng cloud-wins cho groups/channels/watched preferences. Trư
 
 `selectFeed()` là pure function áp group, hidden, content type, duration, watched, search và sorting. API metadata có `publishedAt`; DOM-only metadata dùng `discoveredAt` fallback.
 
-Connect Google và Sync YouTube không còn đợi fetch uploads playlist của từng channel. Sau khi subscription metadata được lưu, alarm `youtube-collections-enrichment` chạy từng batch, merge video mới nhất vào cache và cập nhật `settings.enrichmentCursor/enrichmentTotal`. UI theo dõi `storage.onChanged`, nên Feed và tiến độ cập nhật dần mà không cần reload.
+Connect Google và Sync YouTube không còn đợi fetch uploads playlist của từng channel. Sau khi subscription metadata được lưu, alarm `youtube-collections-enrichment` claim tối đa 10 channel rồi thả mutation queue ngay. YouTube API fetch chạy bên ngoài queue; chỉ bước merge kết quả vào storage là atomic/serialized. Vì vậy tạo/sửa/xóa/gán Group không bị chặn bởi network job.
+
+Enrichment là progressive và per-channel:
+
+- Chỉ channel chưa có dữ liệu hoặc `lastSuccessAt` quá 24 giờ được queue lại.
+- Channel thuộc group vừa tạo/gán được đặt `priority` và xử lý trước.
+- Trạng thái gồm `pending`, `loading`, `ready`, `error`; lỗi retry tối đa 3 lần với backoff 30s/60s/120s.
+- Hết retry được xem là settled và hiển thị warning, không giữ global spinner ở `running` vô hạn.
+- `settings.enrichmentCursor/enrichmentTotal` chỉ là summary tương thích UI; source of truth là `channel.enrichment`.
+- Khi service worker/browser restart, `onStartup` khôi phục alarm nếu state còn việc retry/pending.
+
+Feed group vẫn render cache ngay và chủ động fetch group khi được chọn. Background enrichment là prefetch/bổ sung metadata, không phải dependency của Group actions.
 
 Thứ tự group dùng `Group.position`. Mọi màn hình điều hướng Feed sort tăng dần theo field này; thao tác ưu tiên trong tab Groups hoán đổi vị trí và chuẩn hoá lại toàn bộ dãy.
 
