@@ -5,10 +5,14 @@ import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, req
 import { fetchSubscriptions, fetchSuggestedVideos, fetchUploadFeed, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
 import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags } from '@/src/integrations/cloud-api';
+import { PRODUCTION_CLOUD_API_BASE_URL } from '@/src/config';
 
 async function readState(): Promise<AppState> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
-  return (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
+  const state = (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
+  return state.settings.cloudApiBaseUrl?.trim()
+    ? state
+    : { ...state, settings: { ...state.settings, cloudApiBaseUrl: PRODUCTION_CLOUD_API_BASE_URL } };
 }
 
 async function writeState(state: AppState): Promise<AppState> {

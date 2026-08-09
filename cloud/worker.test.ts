@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAtomVideo, parseCursor, safeEqual } from './worker';
+import { mergeAiGroupBatches, parseAtomVideo, parseCursor, safeEqual } from './worker';
 
 describe('cloud worker helpers', () => {
   it('parses a YouTube Atom entry', () => {
@@ -18,5 +18,16 @@ describe('cloud worker helpers', () => {
     expect(safeEqual('abc', 'abc')).toBe(true);
     expect(safeEqual('abc', 'abd')).toBe(false);
     expect(safeEqual('abc', 'ab')).toBe(false);
+  });
+
+  it('merges batched AI groups, rejects unknown IDs and preserves unassigned channels', () => {
+    const channels = [
+      { id: 'UC1234567890123456789012', title: 'Tech', url: 'https://youtube.com/a' },
+      { id: 'UC1234567890123456789013', title: 'Unknown', url: 'https://youtube.com/b' }
+    ];
+    expect(mergeAiGroupBatches(channels, [{ groups: [{ name: 'Công nghệ', icon: 'x', color: '#000000', channelIds: ['UC1234567890123456789012', 'UC_NOT_ALLOWED'] }] }])).toEqual([
+      { name: 'Công nghệ', icon: '💻', color: '#22d3ee', channelIds: ['UC1234567890123456789012'] },
+      { name: 'Khác', icon: '📁', color: '#94a3b8', channelIds: ['UC1234567890123456789013'] }
+    ]);
   });
 });

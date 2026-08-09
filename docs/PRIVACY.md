@@ -12,7 +12,7 @@
 - Configured Cloud API nhận channel title/description cho AI tags và event cursor cho WebSub inbox.
 - Cloud API nhận Google ID token nếu có. Nếu Chrome trả opaque access token, `/v1/auth/google` phải chỉ verify rồi đổi sang narrow session token, không lưu hoặc sử dụng quyền Google API.
 
-Cloud origin là optional host permission và phải được người dùng approve.
+Production manifest chỉ cấp host permission cho exact Cloud Worker origin; không sử dụng broad optional host permission.
 
 ## Production requirements
 

@@ -34,6 +34,20 @@ interface AiGroup { name: string; icon: string; color: string; channelIds: strin
 const CHANNEL_ID = /^UC[A-Za-z0-9_-]{20,30}$/;
 const HUB_DEFAULT = 'https://pubsubhubbub.appspot.com/subscribe';
 const encoder = new TextEncoder();
+const AI_GROUP_TAXONOMY = [
+  { name: 'Công nghệ', icon: '💻', color: '#22d3ee' },
+  { name: 'Tài chính & Đầu tư', icon: '💰', color: '#facc15' },
+  { name: 'Kinh doanh', icon: '📈', color: '#fb923c' },
+  { name: 'Tin tức', icon: '📰', color: '#f97316' },
+  { name: 'Thể thao', icon: '🏃', color: '#38bdf8' },
+  { name: 'Giải trí', icon: '🎬', color: '#f472b6' },
+  { name: 'Âm nhạc', icon: '🎵', color: '#c084fc' },
+  { name: 'Giáo dục', icon: '🎓', color: '#a78bfa' },
+  { name: 'Du lịch & Đời sống', icon: '✈️', color: '#4ade80' },
+  { name: 'Ẩm thực', icon: '🍳', color: '#fb7185' },
+  { name: 'Sức khỏe', icon: '❤️', color: '#ef4444' },
+  { name: 'Khác', icon: '📁', color: '#94a3b8' }
+] as const;
 
 function json(value: unknown, status = 200, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...headers } });
@@ -161,7 +175,7 @@ async function openAiStructured<T>(env: Env, name: string, schema: Record<string
         { role: 'system', content: `${instructions}\nChỉ trả JSON đúng schema được yêu cầu.` },
         { role: 'user', content: JSON.stringify(input) }
       ],
-      max_tokens: maxOutputTokens,
+      max_tokens: Math.min(maxOutputTokens, 8192),
       response_format: { type: 'json_schema', json_schema: schema }
     }) as { response?: unknown };
     if (typeof result.response === 'string') return JSON.parse(result.response) as T;
@@ -225,25 +239,55 @@ async function aiTags(request: Request, env: Env, identity: Identity, cors: Head
   return json({ tags: [...new Set(result.tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 6), suggestedGroup: result.suggestedGroup ?? undefined, confidence: Math.max(0, Math.min(1, result.confidence)) }, 200, cors);
 }
 
+async function mapConcurrent<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function normalizedGroupName(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+export function mergeAiGroupBatches(channels: ChannelInput[], batches: Array<{ groups?: AiGroup[] }>): AiGroup[] {
+  const allowed = new Set(channels.map((channel) => channel.id));
+  const assigned = new Set<string>();
+  const taxonomyByName = new Map(AI_GROUP_TAXONOMY.map((group) => [normalizedGroupName(group.name), group]));
+  const idsByName = new Map(AI_GROUP_TAXONOMY.map((group) => [group.name, [] as string[]]));
+  for (const batch of batches) {
+    for (const group of Array.isArray(batch.groups) ? batch.groups : []) {
+      if (!group || typeof group.name !== 'string' || !Array.isArray(group.channelIds)) continue;
+      const taxonomy = taxonomyByName.get(normalizedGroupName(group.name)) ?? AI_GROUP_TAXONOMY[AI_GROUP_TAXONOMY.length - 1]!;
+      const ids = idsByName.get(taxonomy.name)!;
+      for (const id of group.channelIds) if (typeof id === 'string' && allowed.has(id) && !assigned.has(id)) { assigned.add(id); ids.push(id); }
+    }
+  }
+  const fallback = idsByName.get('Khác')!;
+  for (const channel of channels) if (!assigned.has(channel.id)) fallback.push(channel.id);
+  return AI_GROUP_TAXONOMY.map((group) => ({ ...group, channelIds: idsByName.get(group.name)! })).filter((group) => group.channelIds.length);
+}
+
 async function aiGroups(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
   if (!(await rateLimit(identity, env, 'ai-groups', 4))) return errorResponse('Đã vượt giới hạn AI Groups 4 requests/phút.', 429, cors);
   const body = await readJson<{ channels?: ChannelInput[] }>(request, 2_000_000);
   const channels = normalizeChannels(body.channels);
   if (!channels.length) return json({ groups: [] }, 200, cors);
-  const result = await openAiStructured<{ groups: AiGroup[] }>(env, 'youtube_channel_groups', groupsSchema,
-    'Tổ chức toàn bộ kênh YouTube thành 5-12 group chủ đề rõ ràng bằng tiếng Việt. Mỗi channel ID phải xuất hiện đúng một lần. Dùng emoji làm icon và màu hex. Không tạo channel ID mới.',
-    { channels: channels.map(({ id, title, description }) => ({ id, title, description: description?.slice(0, 80) })) }, Math.min(24_000, Math.max(4_000, channels.length * 24)));
-  const allowed = new Set(channels.map((channel) => channel.id));
-  const assigned = new Set<string>();
-  const groups = result.groups.slice(0, 12).map((group) => ({
-    name: group.name.trim().slice(0, 60) || 'Khác',
-    icon: group.icon.trim().slice(0, 8) || '✨',
-    color: /^#[0-9a-f]{6}$/i.test(group.color) ? group.color : '#a78bfa',
-    channelIds: [...new Set(group.channelIds)].filter((id) => allowed.has(id) && !assigned.has(id)).map((id) => { assigned.add(id); return id; })
-  })).filter((group) => group.channelIds.length);
-  const missing = channels.map((channel) => channel.id).filter((id) => !assigned.has(id));
-  if (missing.length) groups.push({ name: 'Khác', icon: '📁', color: '#94a3b8', channelIds: missing });
-  return json({ groups }, 200, cors);
+  // A single 900+ channel inference exceeds Workers AI's synchronous request window (3046).
+  // Keep every inference small, run a bounded number concurrently, then merge against one stable taxonomy.
+  const chunks: ChannelInput[][] = [];
+  for (let index = 0; index < channels.length; index += 75) chunks.push(channels.slice(index, index + 75));
+  const taxonomy = AI_GROUP_TAXONOMY.map((group) => group.name).join(', ');
+  const batchResults = await mapConcurrent(chunks, 4, async (chunk, index) => openAiStructured<{ groups: AiGroup[] }>(env, `youtube_channel_groups_${index}`.slice(0, 60), groupsSchema,
+    `Phân loại từng kênh YouTube vào đúng một nhóm trong danh sách cố định sau: ${taxonomy}. Phải dùng chính xác tên nhóm, icon và màu đã cung cấp; không tạo nhóm hoặc channel ID mới.`,
+    { taxonomy: AI_GROUP_TAXONOMY, channels: chunk.map(({ id, title, description }) => ({ id, title, description: description?.slice(0, 100) })) }, Math.max(1800, chunk.length * 24)));
+  return json({ groups: mergeAiGroupBatches(channels, batchResults) }, 200, cors);
 }
 
 function topicFor(channelId: string): string { return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`; }

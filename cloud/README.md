@@ -28,7 +28,7 @@ Copy `database_id` trả về vào `cloud/wrangler.jsonc`, sau đó cập nhật
 
 - `GOOGLE_CLIENT_IDS`: Chrome/Edge OAuth client IDs, phân tách bằng dấu phẩy.
 - `PUBLIC_BASE_URL`: URL Worker production, không có path cuối.
-- `EXTENSION_ORIGINS`: `chrome-extension://<stable-id>`, nhiều origin phân tách bằng dấu phẩy.
+- `EXTENSION_ORIGINS`: `chrome-extension://<stable-id>`, nhiều Chrome/Edge origin phân tách bằng dấu phẩy. ID phải lấy từ chính bản đang load tại `chrome://extensions`/`edge://extensions`, không suy ra từ tên app hay OAuth client.
 - `WORKERS_AI_MODEL`: mặc định `@cf/meta/llama-3.1-8b-instruct-fast`.
 - `OPENAI_MODEL`: chỉ dùng khi cấu hình optional `OPENAI_API_KEY`.
 

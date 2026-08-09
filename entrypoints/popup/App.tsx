@@ -125,6 +125,7 @@ function ChannelsPage({ state, act }: { state: AppState; act: (message: AppMessa
 
 function IntegrationsPanel({ state, act }: { state: AppState; act: (message: AppMessage) => Promise<unknown> }) {
   const [auth, setAuth] = useState<AuthStatus>({ connected: false });
+  const [authLoading, setAuthLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const manifestClientId = browser.runtime.getManifest().oauth2?.client_id;
@@ -136,12 +137,13 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
     try {
       const response = await act(message) as AppResponse;
       if (response.authStatus) setAuth(response.authStatus);
+      if (message.type === 'CONNECT_GOOGLE' && response.authStatus?.connected) await act({ type: 'CHECK_CLOUD_STATUS' });
       const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; registered?: number; queued?: number; permissionGranted?: boolean; status?: { activeSubscriptions?: number; pendingSubscriptions?: number } } | undefined;
       const skipped = feedReport?.skippedChannels ?? [];
       setNotice(feedReport?.granted
-        ? 'Cloud API đã được cấp quyền và health check thành công.'
+        ? 'Cloud API production đã được xác minh và health check thành công.'
         : feedReport?.permissionGranted === false
-          ? 'Origin Cloud chưa được cấp quyền. Hãy bấm “Cho phép Cloud API”.'
+          ? 'Origin Cloud chưa có trong manifest. Hãy reload bản extension production mới nhất.'
           : feedReport?.registered !== undefined
             ? `Đã đưa ${feedReport.registered} channels vào hàng đợi WebSub; active ${feedReport.status?.activeSubscriptions ?? 0}, pending ${feedReport.status?.pendingSubscriptions ?? feedReport.queued ?? 0}.`
             : skipped.length
@@ -150,18 +152,31 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
     } catch (error) { setNotice(error instanceof Error ? error.message : `${label}: thất bại.`); }
     finally { setBusy(''); }
   };
-  useEffect(() => { void act({ type: 'GET_AUTH_STATUS' }).then((response) => { const status = (response as AppResponse).authStatus; if (status) setAuth(status); }); }, [act]);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const response = await act({ type: 'GET_AUTH_STATUS' }) as AppResponse;
+        if (!active) return;
+        if (response.authStatus) setAuth(response.authStatus);
+        if (response.authStatus?.connected) await act({ type: 'CHECK_CLOUD_STATUS' });
+      } catch (error) {
+        if (active) setNotice(error instanceof Error ? error.message : 'Không thể tải trạng thái integrations.');
+      } finally { if (active) setAuthLoading(false); }
+    })();
+    return () => { active = false; };
+  }, [act]);
   return <div className="integration-section">
-    <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>OAuth token chỉ lưu trong browser session và phải kết nối lại sau khi restart.</p></div><span className={auth.connected ? 'status-badge connected' : 'status-badge'}>{auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
-    <label className="form-label">Google OAuth Client ID<input className="field" value={state.settings.googleClientId} placeholder={manifestClientId ? 'Đã cấu hình trong manifest build' : '...apps.googleusercontent.com'} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { googleClientId: event.target.value } })} /></label>
-    <label className="form-label">Cloud API Base URL<input className="field" value={state.settings.cloudApiBaseUrl} placeholder="https://youtube-collections-cloud.your-account.workers.dev" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { cloudApiBaseUrl: event.target.value.trim(), cloudPermissionGranted: false, cloudHealthy: false } })} /></label>
+    <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>OAuth token chỉ lưu trong browser session và phải kết nối lại sau khi restart.</p></div><span className={authLoading ? 'status-badge loading' : auth.connected ? 'status-badge connected' : 'status-badge'}>{authLoading ? 'Đang kiểm tra…' : auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
+    {authLoading ? <div className="integration-loading"><RefreshCw className="spin" size={20} /><span><strong>Đang tải Google & Cloud integrations…</strong><small>Kiểm tra OAuth session, Cloud health và WebSub status.</small></span></div> : <>
+    {!manifestClientId && <label className="form-label">Google OAuth Client ID<input className="field" value={state.settings.googleClientId} placeholder="...apps.googleusercontent.com" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { googleClientId: event.target.value } })} /></label>}
     <div className={`cloud-status-card ${state.settings.cloudHealthy ? 'healthy' : ''}`}>
       <span className="cloud-status-dot" />
       <div><strong>{state.settings.cloudHealthy ? 'Cloud đang hoạt động' : hasCloudUrl ? 'Cloud chưa được xác minh' : 'Cloud chưa cấu hình'}</strong><small>{state.settings.cloudHealthy ? `AI ${state.settings.cloudAiConfigured ? `sẵn sàng · ${state.settings.cloudAiModel ?? 'model đã cấu hình'}` : 'chưa có API key'} · WebSub ${state.settings.webSubActiveCount ?? 0} active / ${state.settings.webSubPendingCount ?? 0} pending` : 'Deploy backend, nhập HTTPS URL rồi cấp quyền cho extension.'}</small></div>
     </div>
     <label className="form-label">Số channel tối đa mỗi lần refresh feed<input className="field" type="number" min="1" max="100" value={state.settings.youtubeSyncChannelLimit} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { youtubeSyncChannelLimit: Math.max(1, Math.min(100, Number(event.target.value) || 25)) } })} /></label>
     <div className="integration-actions">
-      {!auth.connected ? <button className="primary" disabled={Boolean(busy) || !hasGoogleClientId} onClick={() => void run('Kết nối Google', { type: 'CONNECT_GOOGLE' })}>Kết nối Google</button> : <button className="secondary" disabled={Boolean(busy)} onClick={() => void run('Ngắt kết nối', { type: 'DISCONNECT_GOOGLE' })}>Ngắt kết nối</button>}
+      {!auth.connected ? <button className="primary" disabled={Boolean(busy) || !hasGoogleClientId} onClick={() => void run('Kết nối Google', { type: 'CONNECT_GOOGLE' })}>{busy === 'Kết nối Google' ? <><RefreshCw className="spin" size={16} />Đang kết nối Google…</> : 'Kết nối Google'}</button> : <button className="secondary" disabled={Boolean(busy)} onClick={() => void run('Ngắt kết nối', { type: 'DISCONNECT_GOOGLE' })}>Ngắt kết nối</button>}
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Sync subscriptions', { type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' })}>Sync subscriptions</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Refresh API feed', { type: 'REFRESH_YOUTUBE_FEED', payload: { groupId: null } })}>Refresh feed</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} onClick={() => void run('Drive backup', { type: 'DRIVE_PUSH' })}>Push Drive</button>
@@ -173,6 +188,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
     </div>
     {notice && <p className="integration-notice">{notice}</p>}
     <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'} · Cloud poll: {state.settings.lastCloudPollAt ?? 'chưa chạy'}</p>
+    </>}
   </div>;
 }
 

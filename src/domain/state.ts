@@ -1,4 +1,5 @@
 import type { AppState, Channel, FeedFilter, Group, Video } from './types';
+import { PRODUCTION_CLOUD_API_BASE_URL } from '../config';
 
 export const STORAGE_KEY = 'youtube-collections-state-v1';
 export const MAX_CACHED_VIDEOS = 8_000;
@@ -26,7 +27,7 @@ export function createInitialState(): AppState {
       notificationsEnabled: false,
       initialDiscoveryComplete: false,
       googleClientId: '',
-      cloudApiBaseUrl: '',
+      cloudApiBaseUrl: PRODUCTION_CLOUD_API_BASE_URL,
       cloudPermissionGranted: false,
       cloudHealthy: false,
       youtubeSyncChannelLimit: 25,
@@ -50,7 +51,7 @@ export function normalizeImportedState(value: unknown): AppState {
     channels: Array.isArray(candidate.channels) ? candidate.channels : [],
     videos: Array.isArray(candidate.videos) ? candidate.videos.slice(0, MAX_CACHED_VIDEOS) : [],
     videoStates: candidate.videoStates && typeof candidate.videoStates === 'object' ? candidate.videoStates : {},
-    settings: { ...base.settings, ...(candidate.settings ?? {}) },
+    settings: { ...base.settings, ...(candidate.settings ?? {}), cloudApiBaseUrl: candidate.settings?.cloudApiBaseUrl?.trim() || PRODUCTION_CLOUD_API_BASE_URL },
     updatedAt: nowIso()
   };
 }

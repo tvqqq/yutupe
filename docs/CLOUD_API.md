@@ -1,6 +1,6 @@
 # Cloud API contract
 
-Contract này được implement tại `cloud/worker.ts` bằng Cloudflare Worker + D1. Extension chỉ gọi origin HTTPS mà người dùng đã nhập và cấp optional host permission.
+Contract này được implement tại `cloud/worker.ts` bằng Cloudflare Worker + D1. Production extension chỉ gọi exact Worker origin được khai báo trong manifest.
 
 ## Health và status
 

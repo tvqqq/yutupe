@@ -16,9 +16,9 @@ export default defineConfig({
       'https://www.youtube.com/*',
       'https://www.googleapis.com/*',
       'https://oauth2.googleapis.com/*',
-      'https://accounts.google.com/*'
+      'https://accounts.google.com/*',
+      'https://youtube-collections-cloud.qeoqeo.workers.dev/*'
     ],
-    optional_host_permissions: ['https://*/*'],
     action: {
       default_title: 'YouTube Collections'
     },
