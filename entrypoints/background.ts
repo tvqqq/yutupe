@@ -237,12 +237,13 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
     if (message.type === 'REFRESH_YOUTUBE_FEED') {
       const accessToken = await requireAccessToken();
       const groupIds = message.payload.groupId ? new Set(state.groups.find((group) => group.id === message.payload.groupId)?.channelIds ?? []) : null;
+      const requestedChannelIds = message.payload.channelIds?.length ? new Set(message.payload.channelIds) : null;
       const channels = state.channels
-        .filter((channel) => channel.uploadsPlaylistId && (!groupIds || groupIds.has(channel.id)))
+        .filter((channel) => (channel.uploadsPlaylistId || Boolean(requestedChannelIds && channel.id.startsWith('UC'))) && (!groupIds || groupIds.has(channel.id)) && (!requestedChannelIds || requestedChannelIds.has(channel.id)))
         .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
       // A selected group is an explicit request: fetch every channel in that group.
       // The configurable limit only protects the broad "All subscriptions" refresh.
-      const feedChannels = groupIds ? channels : channels.slice(0, state.settings.youtubeSyncChannelLimit);
+      const feedChannels = groupIds || requestedChannelIds ? channels : channels.slice(0, state.settings.youtubeSyncChannelLimit);
       const perChannel = Math.max(1, Math.min(500, message.payload.perChannel ?? 25));
       state = normalizeQuotaWindow(state);
       const projectedDeepRequests = feedChannels.length * Math.ceil(perChannel / 50) + Math.ceil(feedChannels.length * perChannel / 50);

@@ -17,7 +17,7 @@ export type AppMessage =
   | { type: 'CONNECT_GOOGLE' }
   | { type: 'DISCONNECT_GOOGLE' }
   | { type: 'SYNC_YOUTUBE_SUBSCRIPTIONS' }
-  | { type: 'REFRESH_YOUTUBE_FEED'; payload: { groupId: string | null; perChannel?: number } }
+  | { type: 'REFRESH_YOUTUBE_FEED'; payload: { groupId: string | null; perChannel?: number; channelIds?: string[] } }
   | { type: 'UNSUBSCRIBE_CHANNELS'; payload: { channelIds: string[] } }
   | { type: 'DRIVE_PUSH' }
   | { type: 'DRIVE_PULL' }

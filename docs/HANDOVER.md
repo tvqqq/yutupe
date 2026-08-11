@@ -13,6 +13,7 @@
 | YouTube API feed | Done; uploads playlist + video details; cache được bổ sung dần sau sync nhanh |
 | Personalization Lab | Done; Likes API + Watch Later DOM signals, loại Shorts, kết quả dùng section/card giống Feed |
 | YouTube quota optimization | Done; recent/latest qua channel RSS, `videos.list` batch 50, deep history chỉ khi user yêu cầu, quota circuit breaker + suggestion cache |
+| Missing channel feed recovery | Done; Channels tab tách section chưa có `lastPublishedAt`, targeted RSS refresh bằng explicit `channelIds` |
 | Group feed priority | Done; sắp xếp bằng nút lên/xuống, Feed navbar đọc `Group.position` |
 | Bulk unsubscribe thật | Done; preview, confirmation, sequential calls, per-item failure result |
 | Drive appData push/pull | Done; manual snapshot sync |
@@ -64,6 +65,7 @@
 - `playlistItems.list` chỉ còn dùng cho lịch sử sâu khi user bấm Load thêm (>25/channel). Video metadata đã cache không bị gọi lại. Với khoảng 971 channels, một vòng latest enrichment giảm từ khoảng 971 `playlistItems.list` + ~20 `videos.list` xuống khoảng 20 `videos.list`.
 - Personalization cache kết quả 6 giờ và Likes 24 giờ. Không tự gọi lại API mỗi lần user chuyển tab Gợi ý; khi quota cạn sẽ trả cache gần nhất.
 - Cache sanitizer v2 chạy một lần khi đọc state sau upgrade: loại `Untitled video`, `Unknown channel`, title chỉ là duration, URL/video ID sai và mọi DOM recommendation không thuộc canonical `UC...` subscriptions khi API channels đã tồn tại. Parser chỉ nhận semantic title links (`#video-title-link`, `#video-title`, heading links), không còn fallback sang thumbnail watch anchors. Nhánh OAuth quota fallback vẫn dùng state đã sanitize.
+- `REFRESH_YOUTUBE_FEED` hỗ trợ optional `channelIds`. Khi có danh sách này, background bỏ broad `youtubeSyncChannelLimit`, chỉ fetch đúng các channel được yêu cầu và cho phép canonical `UC...` channel dùng RSS ngay cả khi thiếu `uploadsPlaylistId`. Channels UI dùng contract này cho section “Chưa tải Feed”.
 - YouTube Data API không cho đọc playlist Watch Later. Extension lấy Likes bằng `videos.list?myRating=like`, còn Watch Later được thu thập từ DOM khi user mở/scroll `youtube.com/playlist?list=WL`. UI Gợi ý hiển thị riêng số signal đã thu thập và link mở playlist khi chưa có dữ liệu.
 - Search gợi ý không dùng deprecated `relatedToVideoId`; query được suy ra từ token có trọng số (Likes x2, Watch Later x1), sau đó lọc video seed. Data API không có cờ `isShort`, nên luồng này dùng heuristic long-form `> 180s` để không lọt Shorts dài tới 3 phút.
 
