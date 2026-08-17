@@ -49,8 +49,11 @@
 ## Known limitations
 
 - Production OAuth không hoạt động nếu build thiếu `oauth2` manifest client ID/stable extension ID.
+- Edge không hỗ trợ `identity.getAuthToken`; Edge build dùng `launchWebAuthFlow` implicit access-token response với `state` chống CSRF, Web application OAuth client và redirect `https://<EDGE_EXTENSION_ID>.chromiumapp.org/google-oauth`. Không nhúng Web OAuth `client_secret` vào extension.
+- Cloud Worker CORS và Google audience allowlists phải chứa riêng Chrome, Edge Store và mọi ID sideload đang dùng để smoke test; không dùng wildcard origin.
+- Browser notification dùng bitmap `public/icon.png`; SVG có thể gây `Unable to download all specified images` trên Edge. Notification là best-effort và không được làm event sync thất bại.
 - PKCE fallback phụ thuộc OAuth client/redirect policy và không phải đường production khuyến nghị.
-- Access token session hết hạn/restart yêu cầu connect lại; chưa lưu refresh token vì không muốn lưu credential dài hạn trong local storage.
+- Chrome gọi `identity.getAuthToken({ interactive: false })` khi token session hết hạn hoặc browser vừa restart; Chrome Identity tự quản lý cache/expiry nên user chỉ phải connect lại khi Chrome thật sự cần sign-in/consent. Edge implicit flow thử `launchWebAuthFlow` với `prompt=none` và `login_hint` trước khi yêu cầu connect lại; Edge vẫn không lưu refresh token dài hạn.
 - API feed giới hạn số channel mỗi lần refresh để kiểm soát quota.
 - Sau Connect/Sync, metadata subscriptions xuất hiện trước và Groups dùng được ngay. `youtube-collections-enrichment` chỉ queue channel thiếu/stale (>24h), ưu tiên channel của group vừa tạo/gán, fetch ngoài mutation queue và atomic-commit kết quả.
 - Mỗi channel có `enrichment.status`, `retryCount`, timestamps và `error`. Lỗi retry tối đa 3 lần với exponential backoff; exhausted errors được tính là settled để UI không quay vô hạn. Sync YouTube kế tiếp sẽ reset retry cho dữ liệu stale.

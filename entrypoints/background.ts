@@ -70,12 +70,17 @@ async function maybeNotify(state: AppState, videos: Video[]): Promise<void> {
   );
   const relevant = videos.filter((video) => notifiedChannels.has(video.channelId)).slice(0, 3);
   for (const video of relevant) {
-    await browser.notifications.create(`video-${video.id}`, {
-      type: 'basic',
-      iconUrl: browser.runtime.getURL('/icon.svg'),
-      title: video.channelTitle,
-      message: video.title
-    });
+    try {
+      await browser.notifications.create(`video-${video.id}`, {
+        type: 'basic',
+        iconUrl: browser.runtime.getURL('/icon.png'),
+        title: video.channelTitle,
+        message: video.title
+      });
+    } catch {
+      // Notification rendering is best-effort and must not discard a completed
+      // cloud event sync when a browser or OS rejects an image payload.
+    }
   }
 }
 

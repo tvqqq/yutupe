@@ -72,5 +72,5 @@ Chrome/Edge nên có OAuth client riêng. Nếu build chưa chứa manifest `oau
 - Không có credential Google/backend trong repo; integration chỉ chạy sau khi developer cấu hình project tương ứng.
 - Drive pull dùng cloud-wins snapshot, chưa có per-entity tombstone conflict resolution.
 - Cloud backend đã nằm trong repo nhưng cần developer deploy D1 Worker và cấu hình secrets/origins.
-- OAuth access token chỉ giữ trong `storage.session`; người dùng kết nối lại sau khi restart browser.
+- OAuth access token chỉ giữ trong `storage.session`; Chrome và Edge thử khôi phục quyền truy cập âm thầm sau khi token hết hạn hoặc browser restart, và chỉ yêu cầu kết nối lại khi Google cần sign-in/consent mới.
 - Dead-channel classification và Deck view chưa hoàn thiện.

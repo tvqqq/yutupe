@@ -34,6 +34,7 @@ Unit tests hiện bao phủ domain feed, metadata parser và Drive snapshot appl
 18. Chạy AI Groups, xác nhận mọi canonical channel ID chỉ thuộc một AI group và không có ID lạ.
 19. Đăng ký WebSub; status phải chuyển dần từ pending sang active theo cron.
 20. Gửi signed Atom fixture vào callback staging và xác nhận event xuất hiện sau **Đồng bộ events**.
+21. Trên Edge, bật notification cho group rồi **Đồng bộ events**; xác nhận notification dùng PNG và lỗi hiển thị notification không làm event sync thất bại.
 
 ## YouTube layouts cần kiểm tra
 

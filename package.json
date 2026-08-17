@@ -1,6 +1,6 @@
 {
   "name": "youtube-collections-mvp",
-  "version": "0.2.2",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.15.0",

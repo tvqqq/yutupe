@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fallbackAiGroups, mergeAiGroupBatches, parseAtomVideo, parseCursor, safeEqual } from './worker';
+import { fallbackAiGroups, isAllowedOrigin, mergeAiGroupBatches, parseAtomVideo, parseCursor, safeEqual } from './worker';
 
 describe('cloud worker helpers', () => {
   it('parses a YouTube Atom entry', () => {
@@ -18,6 +18,18 @@ describe('cloud worker helpers', () => {
     expect(safeEqual('abc', 'abc')).toBe(true);
     expect(safeEqual('abc', 'abd')).toBe(false);
     expect(safeEqual('abc', 'ab')).toBe(false);
+  });
+
+  it('allows only exact configured Chrome and Edge extension origins', () => {
+    const configured = [
+      'chrome-extension://behfooaigccbooibiabffaehejiagcbi',
+      'chrome-extension://epifobbmlacfdlhlcfmjmlppneopahij',
+      'chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka'
+    ].join(',');
+    expect(isAllowedOrigin('chrome-extension://epifobbmlacfdlhlcfmjmlppneopahij', configured)).toBe(true);
+    expect(isAllowedOrigin('chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka', configured)).toBe(true);
+    expect(isAllowedOrigin('chrome-extension://attacker', configured)).toBe(false);
+    expect(isAllowedOrigin('https://epifobbmlacfdlhlcfmjmlppneopahij.chromiumapp.org', configured)).toBe(false);
   });
 
   it('merges batched AI groups, rejects unknown IDs and preserves unassigned channels', () => {

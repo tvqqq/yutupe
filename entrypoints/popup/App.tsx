@@ -321,7 +321,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
     return () => { active = false; };
   }, [act]);
   return <div className="integration-section">
-    <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>OAuth token chỉ lưu trong browser session và phải kết nối lại sau khi restart.</p></div><span className={authLoading ? 'status-badge loading' : auth.connected ? 'status-badge connected' : 'status-badge'}>{authLoading ? 'Đang kiểm tra…' : auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
+    <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>Google session được gia hạn âm thầm khi browser vẫn còn quyền truy cập.</p></div><span className={authLoading ? 'status-badge loading' : auth.connected ? 'status-badge connected' : 'status-badge'}>{authLoading ? 'Đang kiểm tra…' : auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
     {authLoading ? <div className="integration-loading"><RefreshCw className="spin" size={20} /><span><strong>Đang tải Google & Cloud integrations…</strong><small>Kiểm tra OAuth session, Cloud health và WebSub status.</small></span></div> : <>
     {!manifestClientId && <label className="form-label">Google OAuth Client ID<input className="field" value={state.settings.googleClientId} placeholder="...apps.googleusercontent.com" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { googleClientId: event.target.value } })} /></label>}
     <div className={`cloud-status-card ${state.settings.cloudHealthy ? 'healthy' : ''}`}>

@@ -125,11 +125,16 @@ async function authenticate(request: Request, env: Env): Promise<Identity | null
   return null;
 }
 
+export function isAllowedOrigin(origin: string | null, configuredOrigins: string): boolean {
+  if (!origin) return true;
+  const allowed = configuredOrigins.split(',').map((item) => item.trim()).filter(Boolean);
+  return allowed.includes(origin);
+}
+
 function corsHeaders(request: Request, env: Env): HeadersInit | null {
   const origin = request.headers.get('origin');
   if (!origin) return {};
-  const allowed = env.EXTENSION_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean);
-  if (!allowed.includes(origin)) return null;
+  if (!isAllowedOrigin(origin, env.EXTENSION_ORIGINS)) return null;
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
