@@ -4,8 +4,20 @@ export default defineConfig({
   srcDir: '.',
   modules: ['@wxt-dev/module-react'],
   manifest: ({ browser }) => {
-    const googleClientId = (browser === 'edge' ? process.env.WXT_GOOGLE_CLIENT_ID_EDGE : process.env.WXT_GOOGLE_CLIENT_ID_CHROME)?.trim();
-    const extensionKey = (browser === 'edge' ? process.env.WXT_EXTENSION_KEY_EDGE : process.env.WXT_EXTENSION_KEY_CHROME)?.trim();
+    const googleClientId = (
+      browser === 'edge'
+        ? process.env.WXT_GOOGLE_CLIENT_ID_EDGE
+        : browser === 'firefox'
+        ? process.env.WXT_GOOGLE_CLIENT_ID_FIREFOX
+        : process.env.WXT_GOOGLE_CLIENT_ID_CHROME
+    )?.trim();
+    const extensionKey = (
+      browser === 'edge'
+        ? process.env.WXT_EXTENSION_KEY_EDGE
+        : browser === 'chrome'
+        ? process.env.WXT_EXTENSION_KEY_CHROME
+        : undefined
+    )?.trim();
     return ({
     name: 'YouTube Collections',
     short_name: 'YT Collections',
@@ -22,13 +34,22 @@ export default defineConfig({
     action: {
       default_title: 'YouTube Collections'
     },
-    ...(googleClientId ? { oauth2: { client_id: googleClientId, scopes: [
+    ...(googleClientId && browser === 'chrome' ? { oauth2: { client_id: googleClientId, scopes: [
       'openid',
       'email',
       'https://www.googleapis.com/auth/youtube.force-ssl',
       'https://www.googleapis.com/auth/drive.appdata'
     ] } } : {}),
     ...(extensionKey ? { key: extensionKey } : {}),
-    ...(browser === 'edge' ? { name: 'YouTube Collections for Edge' } : {})
+    ...(browser === 'edge' ? { name: 'YouTube Collections for Edge' } : {}),
+    ...(browser === 'firefox' ? {
+      name: 'YouTube Collections for Firefox',
+      browser_specific_settings: {
+        gecko: {
+          id: process.env.WXT_EXTENSION_ID_FIREFOX?.trim() || 'youtube-collections@extension.local',
+          strict_min_version: '109.0'
+        }
+      }
+    } : {})
   }); }
 });

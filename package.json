@@ -7,10 +7,13 @@
   "scripts": {
     "dev": "wxt",
     "dev:edge": "wxt -b edge",
+    "dev:firefox": "wxt -b firefox",
     "build": "wxt build -b chrome --mv3",
     "build:edge": "wxt build -b edge --mv3",
+    "build:firefox": "wxt build -b firefox --mv3",
     "zip": "wxt zip -b chrome --mv3",
     "zip:edge": "wxt zip -b edge --mv3",
+    "zip:firefox": "wxt zip -b firefox --mv3",
     "cloud:dev": "wrangler dev --config cloud/wrangler.jsonc",
     "cloud:check": "wrangler deploy --dry-run --outdir .output/cloud --config cloud/wrangler.jsonc",
     "cloud:deploy": "wrangler deploy --config cloud/wrangler.jsonc",

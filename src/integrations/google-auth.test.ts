@@ -10,6 +10,10 @@ describe('Google auth browser routing', () => {
   it('uses launchWebAuthFlow for Edge even when the manifest has a client ID', () => {
     expect(shouldUseNativeGoogleAuth('edge', 'client.apps.googleusercontent.com')).toBe(false);
   });
+
+  it('uses launchWebAuthFlow for Firefox even when the manifest has a client ID', () => {
+    expect(shouldUseNativeGoogleAuth('firefox', 'client.apps.googleusercontent.com')).toBe(false);
+  });
 });
 
 describe('Google implicit OAuth response', () => {

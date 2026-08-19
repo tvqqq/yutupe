@@ -1,6 +1,6 @@
 # YouTube Collections
 
-Chrome/Edge Manifest V3 extension để nhóm subscriptions và xem focused feed. Toàn bộ giao diện chạy trực tiếp trong `youtube.com`; extension không còn popup riêng.
+Chrome/Edge/Firefox Manifest V3 extension để nhóm subscriptions và xem focused feed. Toàn bộ giao diện chạy trực tiếp trong `youtube.com`; extension không còn popup riêng.
 
 ## Tính năng
 
@@ -20,7 +20,9 @@ Chrome/Edge Manifest V3 extension để nhóm subscriptions và xem focused feed
 
 ```bash
 pnpm install
-pnpm dev
+pnpm dev          # Chrome
+pnpm dev:edge     # Edge
+pnpm dev:firefox  # Firefox
 ```
 
 Build và kiểm tra:
@@ -28,12 +30,15 @@ Build và kiểm tra:
 ```bash
 pnpm typecheck
 pnpm test
-pnpm build
-pnpm build:edge
+pnpm build          # Chrome (.output/chrome-mv3)
+pnpm build:edge     # Edge (.output/edge-mv3)
+pnpm build:firefox  # Firefox (.output/firefox-mv3)
 pnpm cloud:check
 ```
 
-Load `.output/chrome-mv3` tại `chrome://extensions` hoặc `.output/edge-mv3` tại `edge://extensions`.
+- **Chrome**: Load `.output/chrome-mv3` tại `chrome://extensions` (bật *Developer mode* → *Load unpacked*).
+- **Edge**: Load `.output/edge-mv3` tại `edge://extensions` (bật *Developer mode* → *Load unpacked*).
+- **Firefox**: Mở `about:debugging#/runtime/this-firefox` → bấm **Load Temporary Add-on...** → chọn file `.output/firefox-mv3/manifest.json` (hoặc file zip `.output/youtube-collections-mvp-*.zip`).
 
 ## Google OAuth production setup
 

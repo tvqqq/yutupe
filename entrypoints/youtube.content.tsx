@@ -80,14 +80,16 @@ export default defineContentScript({
       if (invalidated) return;
       installSidebarButton();
       syncSidebarButton();
+      if (location.hash === EXTENSION_ROUTE_HASH) return;
       const payload = scanYouTubePage();
       const listId = new URL(location.href).searchParams.get('list');
       const preferenceSource = listId === 'WL' ? 'watch-later' : listId === 'LL' ? 'liked' : undefined;
       if (payload.videos.length) await sendFromContent({ type: 'DISCOVER', payload: { ...payload, preferenceSource } });
     };
     const schedule = () => {
+      if (invalidated) return;
       if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => { void discover().catch((error) => console.warn('[YouTube Collections] Discovery failed', error)); }, 900);
+      timer = window.setTimeout(() => { void discover().catch((error) => console.warn('[YouTube Collections] Discovery failed', error)); }, 1200);
     };
     const observer = new MutationObserver(schedule);
     observer.observe(document.documentElement, { childList: true, subtree: true });

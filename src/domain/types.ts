@@ -102,6 +102,7 @@ export interface AuthStatus {
   connected: boolean;
   email?: string;
   expiresAt?: number;
+  redirectUri?: string;
 }
 
 export interface AppState {

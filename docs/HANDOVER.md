@@ -81,5 +81,6 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm build:edge
+pnpm build:firefox
 pnpm cloud:check
 ```

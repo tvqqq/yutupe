@@ -20,14 +20,16 @@ describe('cloud worker helpers', () => {
     expect(safeEqual('abc', 'ab')).toBe(false);
   });
 
-  it('allows only exact configured Chrome and Edge extension origins', () => {
+  it('allows configured Chrome, Edge and Firefox extension origins with wildcards', () => {
     const configured = [
       'chrome-extension://behfooaigccbooibiabffaehejiagcbi',
       'chrome-extension://epifobbmlacfdlhlcfmjmlppneopahij',
-      'chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka'
+      'chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka',
+      'moz-extension://*'
     ].join(',');
     expect(isAllowedOrigin('chrome-extension://epifobbmlacfdlhlcfmjmlppneopahij', configured)).toBe(true);
     expect(isAllowedOrigin('chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka', configured)).toBe(true);
+    expect(isAllowedOrigin('moz-extension://d6a54f9a-1234-5678-90ab-cdef01234567', configured)).toBe(true);
     expect(isAllowedOrigin('chrome-extension://attacker', configured)).toBe(false);
     expect(isAllowedOrigin('https://epifobbmlacfdlhlcfmjmlppneopahij.chromiumapp.org', configured)).toBe(false);
   });

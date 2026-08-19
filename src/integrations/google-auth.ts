@@ -123,17 +123,26 @@ async function refreshGoogleSession(interactive: boolean, clientId = ''): Promis
   return refreshWebAuthSession(interactive, clientId);
 }
 
+export function getRedirectUri(): string {
+  try {
+    return browser.identity?.getRedirectURL ? browser.identity.getRedirectURL('google-oauth') : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function getAuthStatus(): Promise<AuthStatus> {
+  const redirectUri = getRedirectUri();
   const session = await readSession();
   if (session && session.expiresAt > Date.now() + 30_000) {
-    return { connected: true, email: session.email, expiresAt: session.expiresAt };
+    return { connected: true, email: session.email, expiresAt: session.expiresAt, redirectUri };
   }
   try {
     const refreshed = await refreshGoogleSession(false);
-    return { connected: true, email: refreshed.email, expiresAt: refreshed.expiresAt };
+    return { connected: true, email: refreshed.email, expiresAt: refreshed.expiresAt, redirectUri };
   } catch {
     if (session) await browser.storage.session.remove(SESSION_KEY);
-    return { connected: false };
+    return { connected: false, redirectUri };
   }
 }
 
@@ -159,7 +168,7 @@ export async function requireIdentityToken(): Promise<string> {
 
 export async function connectGoogle(clientId: string): Promise<AuthStatus> {
   const session = await refreshGoogleSession(true, clientId);
-  return { connected: true, email: session.email, expiresAt: session.expiresAt };
+  return { connected: true, email: session.email, expiresAt: session.expiresAt, redirectUri: getRedirectUri() };
 }
 
 export async function disconnectGoogle(): Promise<void> {

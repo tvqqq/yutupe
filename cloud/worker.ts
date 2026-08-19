@@ -128,7 +128,11 @@ async function authenticate(request: Request, env: Env): Promise<Identity | null
 export function isAllowedOrigin(origin: string | null, configuredOrigins: string): boolean {
   if (!origin) return true;
   const allowed = configuredOrigins.split(',').map((item) => item.trim()).filter(Boolean);
-  return allowed.includes(origin);
+  return allowed.some((pattern) => {
+    if (pattern === '*' || pattern === origin) return true;
+    if (pattern.endsWith('*') && origin.startsWith(pattern.slice(0, -1))) return true;
+    return false;
+  });
 }
 
 function corsHeaders(request: Request, env: Env): HeadersInit | null {

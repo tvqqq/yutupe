@@ -31,21 +31,27 @@ export WXT_EXTENSION_KEY_CHROME="..."
 pnpm build
 ```
 
-Edge không hỗ trợ `identity.getAuthToken`. Bản Edge dùng `identity.launchWebAuthFlow` với OAuth implicit access-token response, `state` chống CSRF và redirect URI cố định theo extension ID:
+Edge và Firefox không hỗ trợ `identity.getAuthToken` theo cơ chế native của Chrome. Cả Edge và Firefox đều dùng `identity.launchWebAuthFlow` với OAuth implicit access-token response, `state` chống CSRF và redirect URI theo extension ID:
 
-```text
-https://<EDGE_EXTENSION_ID>.chromiumapp.org/google-oauth
-```
+- **Edge**:
+  ```text
+  https://<EDGE_EXTENSION_ID>.chromiumapp.org/google-oauth
+  ```
+- **Firefox**:
+  ```text
+  https://9e0af50438f8e8068d4b91b6b9f9de0b4c2a5e04.extensions.allizom.org/google-oauth
+  ```
+  *(Firefox tự băm SHA-1 của extension ID `youtube-collections@extension.local` thành chuỗi hex `9e0af50438f8e8068d4b91b6b9f9de0b4c2a5e04`. Bạn cũng có thể mở Cài đặt trong extension để copy trực tiếp URI này)*
 
-Tạo OAuth Client loại **Web application** riêng cho Edge và thêm URI trên vào **Authorized redirect URIs**, sau đó đặt `WXT_GOOGLE_CLIENT_ID_EDGE`. `WXT_EXTENSION_KEY_EDGE` chỉ cần cho sideload build cần giữ ID ổn định; Microsoft Edge Add-ons giữ ID của item đã phát hành.
+Tạo OAuth Client loại **Web application** riêng cho Edge / Firefox và thêm redirect URI tương ứng vào **Authorized redirect URIs**, sau đó đặt `WXT_GOOGLE_CLIENT_ID_EDGE` hoặc `WXT_GOOGLE_CLIENT_ID_FIREFOX`.
 
-Chrome tự renew token bằng `identity.getAuthToken({ interactive: false })`. Edge không nhận refresh token từ implicit flow nên extension thử một flow `prompt=none` với tài khoản đã biết; chỉ hiện nút connect lại nếu Google không thể hoàn tất flow âm thầm.
+Chrome tự renew token bằng `identity.getAuthToken({ interactive: false })`. Edge và Firefox không nhận refresh token từ implicit flow nên extension thử flow `prompt=none` với tài khoản đã biết; chỉ hiện nút connect lại nếu Google không thể hoàn tất flow âm thầm.
 
 Không commit private signing key hoặc OAuth client secret. Chrome Extension OAuth client không cần client secret trong bundle.
 
 ## Development fallback
 
-Nếu manifest không có `oauth2`, Settings cho phép nhập OAuth Client ID và dùng cùng `launchWebAuthFlow` flow. Redirect URL thực tế lấy từ `chrome.identity.getRedirectURL('google-oauth')`; URL này phải được client chấp nhận. Chrome production tiếp tục dùng manifest OAuth client + `getAuthToken`; Edge nhận access token trực tiếp trong URL fragment vì không thể lưu `client_secret` an toàn trong extension.
+Nếu manifest không có `oauth2`, Settings cho phép nhập OAuth Client ID và dùng cùng `launchWebAuthFlow` flow. Redirect URL thực tế lấy từ `browser.identity.getRedirectURL('google-oauth')`; URL này phải được client chấp nhận. Chrome production tiếp tục dùng manifest OAuth client + `getAuthToken`; Edge/Firefox nhận access token trực tiếp trong URL fragment vì không thể lưu `client_secret` an toàn trong extension.
 
 ## Verification
 

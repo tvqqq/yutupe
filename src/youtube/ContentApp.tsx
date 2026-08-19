@@ -24,13 +24,17 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
     const measure = () => {
       const masthead = document.querySelector('ytd-masthead')?.getBoundingClientRect();
       const guide = document.querySelector('ytd-app #guide, ytd-guide-renderer')?.getBoundingClientRect();
-      setLayout({ top: Math.max(56, Math.round(masthead?.bottom ?? 56)), left: Math.max(72, Math.round(guide?.right ?? 72)) });
+      const nextTop = Math.max(56, Math.round(masthead?.bottom ?? 56));
+      const nextLeft = Math.max(72, Math.round(guide?.right ?? 72));
+      setLayout((prev) => (prev.top === nextTop && prev.left === nextLeft ? prev : { top: nextTop, left: nextLeft }));
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(document.documentElement);
+    window.addEventListener('resize', measure);
     window.addEventListener('yt-navigate-finish', measure);
-    return () => { observer.disconnect(); window.removeEventListener('yt-navigate-finish', measure); };
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('yt-navigate-finish', measure);
+    };
   }, []);
   useEffect(() => {
     if (!open) return;
