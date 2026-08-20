@@ -87,6 +87,88 @@ async function refreshNativeChromeSession(interactive: boolean, current?: TokenS
   return session;
 }
 
+export async function launchWebAuthViaWindow(authUrl: string, redirectUri: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let authTabId: number | undefined;
+    let authWindowId: number | undefined;
+    let settled = false;
+
+    const cleanup = () => {
+      try { browser.tabs?.onUpdated?.removeListener(onUpdated); } catch {}
+      try { browser.tabs?.onRemoved?.removeListener(onRemoved); } catch {}
+      if (authWindowId !== undefined) {
+        browser.windows?.remove(authWindowId).catch(() => undefined);
+      } else if (authTabId !== undefined) {
+        browser.tabs?.remove(authTabId).catch(() => undefined);
+      }
+    };
+
+    const finish = (result: { url?: string; error?: Error }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (result.error) reject(result.error);
+      else if (result.url) resolve(result.url);
+      else reject(new Error('Google OAuth không trả về redirect URL.'));
+    };
+
+    const onUpdated = (tabId: number, changeInfo: { url?: string }, tab?: { url?: string }) => {
+      if (tabId !== authTabId) return;
+      const targetUrl = changeInfo.url || tab?.url;
+      if (!targetUrl) return;
+      if (
+        targetUrl.startsWith(redirectUri) ||
+        ((targetUrl.includes('chromiumapp.org') || targetUrl.includes('extensions.allizom.org')) &&
+          (targetUrl.includes('access_token=') || targetUrl.includes('error=')))
+      ) {
+        finish({ url: targetUrl });
+      }
+    };
+
+    const onRemoved = (tabId: number) => {
+      if (tabId === authTabId) {
+        finish({ error: new Error('Cửa sổ đăng nhập Google đã bị đóng.') });
+      }
+    };
+
+    try {
+      browser.tabs?.onUpdated?.addListener(onUpdated);
+      browser.tabs?.onRemoved?.addListener(onRemoved);
+    } catch {}
+
+    const openPopup = async () => {
+      try {
+        if (browser.windows?.create) {
+          const win = await browser.windows.create({
+            url: authUrl,
+            type: 'popup',
+            width: 520,
+            height: 680,
+            focused: true
+          });
+          authWindowId = win?.id;
+          authTabId = win?.tabs?.[0]?.id;
+          if (!authTabId && win?.id) {
+            const tabs = await browser.tabs.query({ windowId: win.id }).catch(() => []);
+            if (tabs[0]?.id) authTabId = tabs[0].id;
+          }
+          return;
+        }
+      } catch {}
+
+      if (browser.tabs?.create) {
+        const tab = await browser.tabs.create({ url: authUrl, active: true });
+        authTabId = tab?.id;
+        return;
+      }
+
+      finish({ error: new Error('Không thể mở cửa sổ đăng nhập Google.') });
+    };
+
+    void openPopup();
+  });
+}
+
 async function refreshWebAuthSession(interactive: boolean, suppliedClientId = ''): Promise<TokenSession> {
   const current = await readSession();
   const manifestClientId = browser.runtime.getManifest().oauth2?.client_id?.trim();
@@ -101,7 +183,25 @@ async function refreshWebAuthSession(interactive: boolean, suppliedClientId = ''
     interactive,
     email: current?.email
   });
-  const finalUrl = await browser.identity.launchWebAuthFlow({ url, interactive });
+  let finalUrl: string | undefined;
+  try {
+    finalUrl = await browser.identity.launchWebAuthFlow({ url, interactive });
+  } catch (error) {
+    if (!interactive) throw error;
+    try {
+      finalUrl = await launchWebAuthViaWindow(url, redirectUri);
+    } catch (fallbackError) {
+      const origMsg = error instanceof Error ? error.message : '';
+      if (origMsg.includes('could not be loaded') || origMsg.includes('canceled') || origMsg.includes('failure')) {
+        throw new Error(
+          `Google OAuth thất bại: Không thể tải trang xác thực (${origMsg}). Hãy kiểm tra:\n` +
+          `1. Extension đang chạy từ build .output/edge-mv3.\n` +
+          `2. Authorized redirect URI "${redirectUri}" đã được thêm vào Google Cloud Console cho Client ID "${clientId}".`
+        );
+      }
+      throw fallbackError;
+    }
+  }
   if (!finalUrl) throw new Error('Google OAuth không trả về redirect URL.');
   const token = parseOAuthImplicitResponse(finalUrl, oauthState);
   const profile = current?.email ? {} : await readGoogleProfile(token.accessToken);

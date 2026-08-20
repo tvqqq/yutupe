@@ -282,6 +282,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
   const hasGoogleClientId = Boolean(manifestClientId || state.settings.googleClientId.trim());
   const hasCloudUrl = Boolean(state.settings.cloudApiBaseUrl.trim());
   const cloudReady = hasCloudUrl && Boolean(state.settings.cloudPermissionGranted);
+  const redirectUri = auth.redirectUri || (browser.identity?.getRedirectURL ? browser.identity.getRedirectURL('google-oauth') : '');
   const run = async (label: string, message: AppMessage) => {
     setBusy(label); setNotice('');
     try {
@@ -323,22 +324,32 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
   return <div className="integration-section">
     <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>Google session được gia hạn âm thầm khi browser vẫn còn quyền truy cập.</p></div><span className={authLoading ? 'status-badge loading' : auth.connected ? 'status-badge connected' : 'status-badge'}>{authLoading ? 'Đang kiểm tra…' : auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
     {authLoading ? <div className="integration-loading"><RefreshCw className="spin" size={20} /><span><strong>Đang tải Google & Cloud integrations…</strong><small>Kiểm tra OAuth session, Cloud health và WebSub status.</small></span></div> : <>
-    {!manifestClientId && (
+    {!manifestClientId ? (
       <div>
         <label className="form-label">
           Google OAuth Client ID
           <input className="field" value={state.settings.googleClientId} placeholder="...apps.googleusercontent.com" onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { googleClientId: event.target.value } })} />
         </label>
-        {auth.redirectUri && (
+        {redirectUri && (
           <div style={{ marginTop: '6px', marginBottom: '10px', fontSize: '12px', color: '#94a3b8' }}>
             <span>Authorized redirect URI cho Google Cloud Console:</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-              <code style={{ background: 'rgba(255,255,255,0.07)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', flex: 1, overflowX: 'auto', userSelect: 'all', whiteSpace: 'nowrap', border: '1px solid rgba(255,255,255,0.1)' }}>{auth.redirectUri}</code>
-              <button type="button" className="ghost" style={{ padding: '3px 8px', fontSize: '11px', whiteSpace: 'nowrap', height: '26px' }} onClick={() => { void navigator.clipboard.writeText(auth.redirectUri ?? ''); setNotice('Đã copy Redirect URI.'); }}>Copy</button>
+              <code style={{ background: 'rgba(255,255,255,0.07)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', flex: 1, overflowX: 'auto', userSelect: 'all', whiteSpace: 'nowrap', border: '1px solid rgba(255,255,255,0.1)' }}>{redirectUri}</code>
+              <button type="button" className="ghost" style={{ padding: '3px 8px', fontSize: '11px', whiteSpace: 'nowrap', height: '26px' }} onClick={() => { void navigator.clipboard.writeText(redirectUri); setNotice('Đã copy Redirect URI.'); }}>Copy</button>
             </div>
           </div>
         )}
       </div>
+    ) : (
+      !auth.connected && redirectUri && (
+        <div style={{ marginTop: '4px', marginBottom: '10px', fontSize: '12px', color: '#94a3b8' }}>
+          <span>Authorized redirect URI cho Google Cloud Console:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+            <code style={{ background: 'rgba(255,255,255,0.07)', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', flex: 1, overflowX: 'auto', userSelect: 'all', whiteSpace: 'nowrap', border: '1px solid rgba(255,255,255,0.1)' }}>{redirectUri}</code>
+            <button type="button" className="ghost" style={{ padding: '3px 8px', fontSize: '11px', whiteSpace: 'nowrap', height: '26px' }} onClick={() => { void navigator.clipboard.writeText(redirectUri); setNotice('Đã copy Redirect URI.'); }}>Copy</button>
+          </div>
+        </div>
+      )
     )}
     <div className={`cloud-status-card ${state.settings.cloudHealthy ? 'healthy' : ''}`}>
       <span className="cloud-status-dot" />

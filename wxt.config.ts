@@ -23,7 +23,7 @@ export default defineConfig({
     short_name: 'YT Collections',
     description: 'Group subscriptions and watch a focused YouTube feed.',
     minimum_chrome_version: '120',
-    permissions: ['storage', 'notifications', 'identity', 'activeTab', 'alarms'],
+    permissions: ['storage', 'notifications', 'identity', 'activeTab', 'alarms', 'tabs'],
     host_permissions: [
       'https://www.youtube.com/*',
       'https://www.googleapis.com/*',
@@ -34,7 +34,7 @@ export default defineConfig({
     action: {
       default_title: 'YouTube Collections'
     },
-    ...(googleClientId && browser === 'chrome' ? { oauth2: { client_id: googleClientId, scopes: [
+    ...(googleClientId && (browser === 'chrome' || browser === 'edge') ? { oauth2: { client_id: googleClientId, scopes: [
       'openid',
       'email',
       'https://www.googleapis.com/auth/youtube.force-ssl',
