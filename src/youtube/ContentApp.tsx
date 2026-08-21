@@ -1,25 +1,49 @@
 import { useEffect, useRef, useState } from 'react';
 import Dashboard from '@/entrypoints/popup/App';
 import { EXTENSION_ROUTE_HASH } from '@/src/config';
+import type { Channel } from '@/src/domain/types';
+import { useAppState } from '@/src/ui/use-app-state';
+import { QuickGroupModal } from './QuickGroupModal';
+
+export const OPEN_QUICK_GROUP_EVENT = 'youtube-collections:open-quick-group';
 
 export default function ContentApp({ openEvent }: { openEvent: string }) {
   const [open, setOpen] = useState(() => location.hash === EXTENSION_ROUTE_HASH);
   const [layout, setLayout] = useState({ top: 56, left: 72 });
+  const [quickChannel, setQuickChannel] = useState<Channel | null>(null);
   const openedByExtension = useRef(false);
+  const { state, act } = useAppState();
+
+  const openDashboard = () => {
+    if (location.hash === EXTENSION_ROUTE_HASH) return setOpen(true);
+    openedByExtension.current = true;
+    history.pushState({ ...history.state, youtubeCollections: true }, '', `/${EXTENSION_ROUTE_HASH}`);
+    setOpen(true);
+    window.dispatchEvent(new Event('youtube-collections:route-change'));
+  };
+
   useEffect(() => {
     const syncRoute = () => setOpen(location.hash === EXTENSION_ROUTE_HASH);
-    const listener = () => {
-      if (location.hash === EXTENSION_ROUTE_HASH) return setOpen(true);
-      openedByExtension.current = true;
-      history.pushState({ ...history.state, youtubeCollections: true }, '', `/${EXTENSION_ROUTE_HASH}`);
-      setOpen(true);
-      window.dispatchEvent(new Event('youtube-collections:route-change'));
+    const listener = () => openDashboard();
+    const quickListener = (event: Event) => {
+      const customEvent = event as CustomEvent<{ channel: Channel }>;
+      if (customEvent.detail?.channel) {
+        setQuickChannel(customEvent.detail.channel);
+      }
     };
+
     window.addEventListener(openEvent, listener);
+    window.addEventListener(OPEN_QUICK_GROUP_EVENT, quickListener);
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
-    return () => { window.removeEventListener(openEvent, listener); window.removeEventListener('hashchange', syncRoute); window.removeEventListener('popstate', syncRoute); };
+    return () => {
+      window.removeEventListener(openEvent, listener);
+      window.removeEventListener(OPEN_QUICK_GROUP_EVENT, quickListener);
+      window.removeEventListener('hashchange', syncRoute);
+      window.removeEventListener('popstate', syncRoute);
+    };
   }, [openEvent]);
+
   useEffect(() => {
     const measure = () => {
       const masthead = document.querySelector('ytd-masthead')?.getBoundingClientRect();
@@ -36,6 +60,7 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
       window.removeEventListener('yt-navigate-finish', measure);
     };
   }, []);
+
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -57,10 +82,30 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
     if (openedByExtension.current) { openedByExtension.current = false; history.back(); }
     else { history.replaceState(history.state, '', '/'); setOpen(false); window.dispatchEvent(new Event('youtube-collections:route-change')); }
   };
-  if (!open) return null;
 
   const dark = document.documentElement.hasAttribute('dark');
-  return <div className="ytc-root is-open is-page" style={{ '--ytc-top': `${layout.top}px`, '--ytc-left': `${layout.left}px` } as React.CSSProperties} data-theme={dark ? 'dark' : 'light'}>
-    <section className="ytc-workspace" aria-label="YouTube Collections page"><Dashboard embedded onClose={closePage} /></section>
-  </div>;
+
+  return (
+    <>
+      {open && (
+        <div className="ytc-root is-open is-page" style={{ '--ytc-top': `${layout.top}px`, '--ytc-left': `${layout.left}px` } as React.CSSProperties} data-theme={dark ? 'dark' : 'light'}>
+          <section className="ytc-workspace" aria-label="YouTube Collections page">
+            <Dashboard embedded onClose={closePage} />
+          </section>
+        </div>
+      )}
+      {quickChannel && state && (
+        <div className="ytc-root is-modal-root" data-theme={dark ? 'dark' : 'light'}>
+          <QuickGroupModal
+            channel={quickChannel}
+            state={state}
+            act={act}
+            onClose={() => setQuickChannel(null)}
+            onOpenDashboard={openDashboard}
+          />
+        </div>
+      )}
+    </>
+  );
 }
+

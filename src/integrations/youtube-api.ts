@@ -1,4 +1,4 @@
-import type { Channel, Video } from '@/src/domain/types';
+import type { Channel, ContentType, Video } from '@/src/domain/types';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 const PERSONALIZATION_MIN_LONG_FORM_SECONDS = 180;
@@ -167,11 +167,13 @@ export async function fetchRecentUploadFeed(accessToken: string, channels: Chann
     }
   }
   return {
-    videos: videos.map((video) => {
-      const detail = details.get(video.id);
-      const contentType = detail?.live === 'live' ? 'live' : detail?.live === 'upcoming' ? 'upcoming' : detail?.durationSeconds !== undefined && detail.durationSeconds <= 60 ? 'short' : 'video';
-      return { ...video, durationSeconds: detail?.durationSeconds, viewCount: detail?.viewCount, contentType };
-    }),
+    videos: videos
+      .map((video) => {
+        const detail = details.get(video.id);
+        const contentType: ContentType = detail?.live === 'live' ? 'live' : detail?.live === 'upcoming' ? 'upcoming' : detail?.durationSeconds !== undefined && detail.durationSeconds <= 60 ? 'short' : 'video';
+        return { ...video, durationSeconds: detail?.durationSeconds, viewCount: detail?.viewCount, contentType };
+      })
+      .filter((video) => video.contentType !== 'short' && (video.durationSeconds === undefined || video.durationSeconds > 60) && !video.url.includes('/shorts/')),
     skippedChannels,
     source: 'rss',
     quotaExceeded,
@@ -227,11 +229,13 @@ export async function fetchUploadFeed(accessToken: string, channels: Channel[], 
     const page = await apiJson<{ items?: Array<{ id: string; contentDetails?: { duration?: string }; statistics?: { viewCount?: string }; snippet?: { liveBroadcastContent?: string }; liveStreamingDetails?: { actualEndTime?: string; scheduledStartTime?: string } }> }>(`${API}/videos?${params}`, accessToken);
     for (const item of page.items ?? []) details.set(item.id, { durationSeconds: parseIsoDuration(item.contentDetails?.duration), viewCount: item.statistics?.viewCount ? Number(item.statistics.viewCount) : undefined, live: item.liveStreamingDetails?.actualEndTime ? 'ended' : item.snippet?.liveBroadcastContent });
   }
-  const videos = snippets.map((item) => {
-    const detail = details.get(item.id);
-    const contentType = detail?.live === 'live' ? 'live' : detail?.live === 'upcoming' ? 'upcoming' : (detail?.durationSeconds ?? 999) <= 60 ? 'short' : 'video';
-    return { ...item, url: `https://www.youtube.com/watch?v=${item.id}`, durationSeconds: detail?.durationSeconds, viewCount: detail?.viewCount, contentType, discoveredAt: new Date().toISOString() } satisfies Video;
-  });
+  const videos = snippets
+    .map((item) => {
+      const detail = details.get(item.id);
+      const contentType = detail?.live === 'live' ? 'live' : detail?.live === 'upcoming' ? 'upcoming' : (detail?.durationSeconds ?? 999) <= 60 ? 'short' : 'video';
+      return { ...item, url: `https://www.youtube.com/watch?v=${item.id}`, durationSeconds: detail?.durationSeconds, viewCount: detail?.viewCount, contentType, discoveredAt: new Date().toISOString() } satisfies Video;
+    })
+    .filter((video) => video.contentType !== 'short' && (video.durationSeconds === undefined || video.durationSeconds > 60) && !video.url.includes('/shorts/'));
   return { videos, skippedChannels, source: 'api', apiRequests };
 }
 

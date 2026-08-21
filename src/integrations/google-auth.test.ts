@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOAuthAuthorizationUrl, parseOAuthImplicitResponse, shouldUseNativeGoogleAuth } from './google-auth';
+import { buildOAuthAuthorizationUrl, parseOAuthCodeResponse, parseOAuthImplicitResponse, shouldUseNativeGoogleAuth } from './google-auth';
 
 describe('Google auth browser routing', () => {
   it('uses getAuthToken only for Chrome builds with a manifest client ID', () => {
@@ -32,12 +32,36 @@ describe('Google implicit OAuth response', () => {
   });
 });
 
+describe('Google authorization code OAuth response', () => {
+  it('accepts authorization code when state matches in search params', () => {
+    expect(parseOAuthCodeResponse(
+      'https://extension.chromiumapp.org/google-oauth?code=code-456&state=expected',
+      'expected'
+    )).toBe('code-456');
+  });
+
+  it('accepts authorization code when state matches in hash params', () => {
+    expect(parseOAuthCodeResponse(
+      'https://extension.chromiumapp.org/google-oauth#code=code-789&state=expected',
+      'expected'
+    )).toBe('code-789');
+  });
+
+  it('rejects code when state is mismatched', () => {
+    expect(() => parseOAuthCodeResponse(
+      'https://extension.chromiumapp.org/google-oauth?code=code-456&state=unexpected',
+      'expected'
+    )).toThrow('state không hợp lệ');
+  });
+});
+
 describe('Google OAuth authorization URL', () => {
   it('uses consent only for a user-initiated connection', () => {
     const url = new URL(buildOAuthAuthorizationUrl({
       clientId: 'client-id', redirectUri: 'https://extension.chromiumapp.org/google-oauth', state: 'state', interactive: true
     }));
     expect(url.searchParams.get('prompt')).toBe('consent');
+    expect(url.searchParams.get('response_type')).toBe('token');
     expect(url.searchParams.get('login_hint')).toBeNull();
   });
 
@@ -46,6 +70,7 @@ describe('Google OAuth authorization URL', () => {
       clientId: 'client-id', redirectUri: 'https://extension.chromiumapp.org/google-oauth', state: 'state', interactive: false, email: 'user@example.com'
     }));
     expect(url.searchParams.get('prompt')).toBe('none');
+    expect(url.searchParams.get('response_type')).toBe('token');
     expect(url.searchParams.get('login_hint')).toBe('user@example.com');
     expect(url.searchParams.get('state')).toBe('state');
   });

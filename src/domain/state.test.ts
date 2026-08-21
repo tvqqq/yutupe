@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { createInitialState, ENRICHMENT_MAX_RETRIES, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeImportedState, queueChannelsForEnrichment, retainOnlyChannelIds, sanitizeVideoCache, selectFeed, upsertById, withEnrichmentSummary } from './state';
+import { createInitialState, ENRICHMENT_MAX_RETRIES, findMatchingChannel, getAssignedGroupIds, mergeDiscoveredChannels, mergeDiscoveredVideos, normalizeChannelPath, normalizeImportedState, queueChannelsForEnrichment, retainOnlyChannelIds, sanitizeVideoCache, selectFeed, upsertById, withEnrichmentSummary } from './state';
 import type { AppState, FeedFilter, Video } from './types';
 
 const videos: Video[] = [
   { id: 'a', title: 'React course', url: 'https://youtube.com/watch?v=a', channelId: 'c1', channelTitle: 'Dev', durationSeconds: 600, viewCount: 100, contentType: 'video', discoveredAt: '2026-01-02T00:00:00Z' },
-  { id: 'b', title: 'Daily short', url: 'https://youtube.com/shorts/b', channelId: 'c2', channelTitle: 'News', durationSeconds: 50, viewCount: 900, contentType: 'short', discoveredAt: '2026-01-03T00:00:00Z' },
+  { id: 'b', title: 'Quick tip', url: 'https://youtube.com/watch?v=b', channelId: 'c2', channelTitle: 'News', durationSeconds: 150, viewCount: 900, contentType: 'video', discoveredAt: '2026-01-03T00:00:00Z' },
   { id: 'c', title: 'Long interview', url: 'https://youtube.com/watch?v=c', channelId: 'c1', channelTitle: 'Dev', durationSeconds: 3600, viewCount: 300, contentType: 'video', discoveredAt: '2026-01-01T00:00:00Z' }
 ];
 
 function state(): AppState {
   return {
     ...createInitialState(),
-    groups: [{ id: 'g1', name: 'Tech', icon: '💻', color: '#00ffff', channelIds: ['c1'], notifications: false, position: 0, createdAt: '', updatedAt: '' }],
+    channels: [
+      { id: 'c1', title: 'Dev Channel', url: 'https://youtube.com/@devchannel', lastSeenAt: '', status: 'active', tags: [] },
+      { id: 'channel:/@news', title: 'News Hub', url: 'https://youtube.com/@news', lastSeenAt: '', status: 'active', tags: [] }
+    ],
+    groups: [
+      { id: 'g1', name: 'Tech', icon: '💻', color: '#00ffff', channelIds: ['c1'], notifications: false, position: 0, createdAt: '', updatedAt: '' },
+      { id: 'g2', name: 'Media', icon: '📁', color: '#ff00ff', channelIds: ['channel:/@news'], notifications: false, position: 1, createdAt: '', updatedAt: '' }
+    ],
     videos,
     videoStates: { a: { watchedAt: '2026-01-05T00:00:00Z' } }
   };
@@ -25,12 +32,33 @@ describe('selectFeed', () => {
   });
 
   it('filters duration and content type', () => {
-    expect(selectFeed(state(), { ...filter, duration: 'short', contentTypes: ['short'] }).map((item) => item.id)).toEqual(['b']);
+    expect(selectFeed(state(), { ...filter, duration: 'short', contentTypes: ['video'] }).map((item) => item.id)).toEqual(['b']);
   });
 
   it('sorts by popularity and duration', () => {
     expect(selectFeed(state(), { ...filter, sort: 'popular' }).map((item) => item.id)).toEqual(['b', 'c', 'a']);
     expect(selectFeed(state(), { ...filter, sort: 'duration-desc' }).map((item) => item.id)).toEqual(['c', 'a', 'b']);
+  });
+});
+
+describe('channel group matching', () => {
+  it('matches channels by canonical id, handle URL, or title', () => {
+    const s = state();
+    const candidateFromDOM = {
+      id: 'channel:/@devchannel',
+      url: 'https://www.youtube.com/@DevChannel',
+      title: 'Dev Channel'
+    };
+
+    expect(findMatchingChannel(s, candidateFromDOM)?.id).toBe('c1');
+    expect(getAssignedGroupIds(s, candidateFromDOM)).toEqual(['g1']);
+
+    const newsCandidate = {
+      id: 'channel:/@news',
+      url: 'https://youtube.com/@news',
+      title: 'News Hub'
+    };
+    expect(getAssignedGroupIds(s, newsCandidate)).toEqual(['g2']);
   });
 });
 

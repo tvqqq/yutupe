@@ -185,6 +185,67 @@ function matchesDuration(seconds: number | undefined, duration: FeedFilter['dura
   return seconds > 20 * 60;
 }
 
+export function normalizeChannelPath(urlOrId: string): string {
+  try {
+    const raw = urlOrId.replace(/^channel:/, '');
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return new URL(raw).pathname.replace(/\/$/, '').toLocaleLowerCase();
+    }
+    return raw.replace(/\/$/, '').toLocaleLowerCase();
+  } catch {
+    return urlOrId.replace(/^channel:/, '').replace(/\/$/, '').toLocaleLowerCase();
+  }
+}
+
+export function findMatchingChannel(state: AppState, candidate: { id?: string; url?: string; title?: string }): Channel | null {
+  if (!candidate) return null;
+  const candidatePath = candidate.url ? normalizeChannelPath(candidate.url) : candidate.id ? normalizeChannelPath(candidate.id) : '';
+  const candidateTitle = candidate.title?.trim().toLocaleLowerCase();
+  const candidateId = candidate.id;
+
+  return state.channels.find((c) => {
+    if (candidateId && c.id === candidateId) return true;
+    if (candidatePath && normalizeChannelPath(c.url) === candidatePath) return true;
+    if (candidatePath && normalizeChannelPath(c.id) === candidatePath) return true;
+    if (candidateTitle && c.title?.trim().toLocaleLowerCase() === candidateTitle) return true;
+    return false;
+  }) ?? null;
+}
+
+export function getAssignedGroupIds(state: AppState, candidate: { id: string; url?: string; title?: string }): string[] {
+  const matched = findMatchingChannel(state, candidate);
+  const candidatePath = candidate.url ? normalizeChannelPath(candidate.url) : normalizeChannelPath(candidate.id);
+  const candidateTitle = candidate.title?.trim().toLocaleLowerCase();
+
+  const allPossibleIds = new Set<string>();
+  allPossibleIds.add(candidate.id);
+  if (matched) allPossibleIds.add(matched.id);
+
+  for (const c of state.channels) {
+    if (candidatePath && (normalizeChannelPath(c.url) === candidatePath || normalizeChannelPath(c.id) === candidatePath)) {
+      allPossibleIds.add(c.id);
+    }
+    if (candidateTitle && c.title?.trim().toLocaleLowerCase() === candidateTitle) {
+      allPossibleIds.add(c.id);
+    }
+  }
+
+  const assigned = new Set<string>();
+  for (const group of state.groups) {
+    for (const gid of group.channelIds) {
+      if (allPossibleIds.has(gid)) {
+        assigned.add(group.id);
+        break;
+      }
+      if (candidatePath && normalizeChannelPath(gid) === candidatePath) {
+        assigned.add(group.id);
+        break;
+      }
+    }
+  }
+  return [...assigned];
+}
+
 export function selectFeed(state: AppState, filter: FeedFilter): Video[] {
   const channelIds = channelsForGroup(state, filter.groupId);
   const query = filter.query.trim().toLocaleLowerCase();
@@ -192,6 +253,11 @@ export function selectFeed(state: AppState, filter: FeedFilter): Video[] {
   const blockChannels = new Set((state.settings.blocklistChannels ?? []).map((c) => c.trim().toLocaleLowerCase()));
 
   const result = state.videos.filter((video) => {
+    // Exclude Shorts completely from feed
+    if (video.contentType === 'short' || video.url.includes('/shorts/') || (video.durationSeconds !== undefined && video.durationSeconds <= 60)) {
+      return false;
+    }
+
     const videoState = state.videoStates[video.id];
     const watched = Boolean(videoState?.watchedAt);
     if (videoState?.hiddenAt) return false;

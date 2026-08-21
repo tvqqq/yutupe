@@ -61,7 +61,7 @@ export function FeedControls({ state, filter, onChange, recommendedOnly = false,
       </select>
     </div>
     <div className="type-row">
-      {(['video', 'short', 'live', 'upcoming'] as ContentType[]).map((type) => <button key={type} onClick={() => toggleType(type)} className={filter.contentTypes.includes(type) ? 'type-pill selected' : 'type-pill'}>{type === 'video' ? 'Video' : type === 'short' ? 'Shorts' : type === 'live' ? 'Live' : 'Upcoming'}</button>)}
+      {(['video', 'live', 'upcoming'] as ContentType[]).map((type) => <button key={type} onClick={() => toggleType(type)} className={filter.contentTypes.includes(type) ? 'type-pill selected' : 'type-pill'}>{type === 'video' ? 'Video' : type === 'live' ? 'Live' : 'Upcoming'}</button>)}
     </div>
   </div>;
 }

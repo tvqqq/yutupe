@@ -277,11 +277,11 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
         if (!latestByChannel.get(video.channelId) || Date.parse(published) > Date.parse(latestByChannel.get(video.channelId)!)) latestByChannel.set(video.channelId, published);
       }
       const refreshedIds = new Set(feedChannels.map((channel) => channel.id));
-      const refreshedAt = nowIso();
-      state = withEnrichmentSummary({ ...state, channels: state.channels.map((channel) => refreshedIds.has(channel.id) && !skippedIds.has(channel.id) ? { ...channel, lastPublishedAt: latestByChannel.get(channel.id) ?? channel.lastPublishedAt, enrichment: { ...channel.enrichment, status: 'ready', priority: false, retryCount: channel.enrichment?.retryCount ?? 0, lastSuccessAt: refreshedAt, error: undefined, nextRetryAt: undefined } } : channel) });
-      state = { ...state, videos: mergeDiscoveredVideos(state.videos, videos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS), settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
+      const nonShortVideos = videos.filter((v) => v.contentType !== 'short' && (v.durationSeconds === undefined || v.durationSeconds > 60) && !v.url.includes('/shorts/'));
+      const cleanExistingVideos = state.videos.filter((v) => v.contentType !== 'short' && (v.durationSeconds === undefined || v.durationSeconds > 60) && !v.url.includes('/shorts/'));
+      state = { ...state, videos: mergeDiscoveredVideos(cleanExistingVideos, nonShortVideos).sort((a, b) => Date.parse(b.publishedAt ?? b.discoveredAt) - Date.parse(a.publishedAt ?? a.discoveredAt)).slice(0, MAX_CACHED_VIDEOS), settings: { ...state.settings, lastYoutubeSyncAt: nowIso() } };
       const saved = await writeState(state);
-      return { ok: true, state: saved, data: { videoCount: videos.length, skippedChannels, source, quotaFallback: useQuotaFreeRecentFeed && (quotaBlocked(state) || Boolean(quotaExceeded)) } };
+      return { ok: true, state: saved, data: { videoCount: nonShortVideos.length, skippedChannels, source, quotaFallback: useQuotaFreeRecentFeed && (quotaBlocked(state) || Boolean(quotaExceeded)) } };
     }
 
     if (message.type === 'UNSUBSCRIBE_CHANNELS') {

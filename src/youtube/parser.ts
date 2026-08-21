@@ -28,7 +28,7 @@ function absoluteUrl(href: string): string {
   return new URL(href, 'https://www.youtube.com').toString();
 }
 
-function idFromChannelUrl(href: string): string {
+export function idFromChannelUrl(href: string): string {
   try {
     return `channel:${new URL(href, 'https://www.youtube.com').pathname.replace(/\/$/, '')}`;
   } catch {
@@ -73,6 +73,8 @@ export function scanYouTubePage(root: ParentNode = document): DiscoveredPayload 
     const thumbnailUrl = card.querySelector<HTMLImageElement>('ytd-thumbnail img, img.yt-core-image')?.src || undefined;
     const title = titleAnchor.getAttribute('title')?.trim() || titleAnchor.textContent?.trim();
     if (!title || /^\d{1,3}:\d{2}(?::\d{2})?$/u.test(title)) continue;
+    const contentType = contentTypeFor(card, titleAnchor.href, durationSeconds);
+    if (contentType === 'short' || parsed.pathname.startsWith('/shorts/')) continue;
 
     channels.set(channelId, {
       id: channelId,
@@ -100,3 +102,70 @@ export function scanYouTubePage(root: ParentNode = document): DiscoveredPayload 
 
   return { channels: [...channels.values()], videos: [...videos.values()] };
 }
+
+export function getCurrentPageChannel(root: ParentNode = document): Channel | null {
+  const discoveredAt = new Date().toISOString();
+
+  // 1. Try Watch Page owner section
+  const watchOwner = root.querySelector(
+    'ytd-watch-metadata ytd-video-owner-renderer, ytd-video-owner-renderer, #owner.ytd-watch-metadata, #owner, ytd-watch-metadata'
+  );
+  if (watchOwner) {
+    const channelAnchor = watchOwner.querySelector<HTMLAnchorElement>(
+      'a.yt-simple-endpoint[href*="/@"], a.yt-simple-endpoint[href*="/channel/"], a.yt-simple-endpoint[href*="/c/"], a.yt-simple-endpoint[href*="/user/"], #channel-name a, ytd-channel-name a, a#avatar'
+    );
+    const channelTitle = channelAnchor?.textContent?.trim() || watchOwner.querySelector('#channel-name, ytd-channel-name, #upload-info #channel-name, .ytd-channel-name')?.textContent?.trim();
+    if (channelTitle) {
+      const href = channelAnchor?.getAttribute('href') || channelAnchor?.href;
+      const channelUrl = href ? absoluteUrl(href) : `https://www.youtube.com/results?search_query=${encodeURIComponent(channelTitle)}`;
+      const channelId = idFromChannelUrl(channelUrl);
+      const avatarImg = watchOwner.querySelector<HTMLImageElement>('#avatar img, yt-img-shadow img, img.yt-core-image, yt-avatar-shape img');
+      const subText = watchOwner.querySelector<HTMLElement>('#owner-sub-count, yt-formatted-string#owner-sub-count')?.textContent ?? '';
+      return {
+        id: channelId,
+        title: channelTitle,
+        url: channelUrl,
+        thumbnailUrl: avatarImg?.src || undefined,
+        subscriberCount: parseCompactNumber(subText),
+        lastSeenAt: discoveredAt,
+        status: 'active',
+        tags: []
+      };
+    }
+  }
+
+  // 2. Try Channel Page Header
+  const channelHeader = root.querySelector('yt-page-header-renderer, ytd-c4-tabbed-header-renderer, ytd-page-header-renderer, #page-header-container');
+  if (channelHeader) {
+    const titleEl = channelHeader.querySelector(
+      '.page-header-view-model-wiz__page-header-title, #channel-name, #page-header-container h1, yt-page-header-renderer h1, yt-formatted-string.ytd-channel-name'
+    );
+    const channelTitle = titleEl?.textContent?.trim();
+    if (channelTitle) {
+      const canonicalHref = (typeof document !== 'undefined' ? document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href : undefined);
+      const isChannelPath = typeof location !== 'undefined' && (location.pathname.startsWith('/@') || location.pathname.startsWith('/channel/') || location.pathname.startsWith('/c/') || location.pathname.startsWith('/user/'));
+      const channelUrl = canonicalHref && (canonicalHref.includes('/@') || canonicalHref.includes('/channel/'))
+        ? canonicalHref
+        : isChannelPath
+          ? `${location.origin}${location.pathname}`
+          : `https://www.youtube.com/results?search_query=${encodeURIComponent(channelTitle)}`;
+      const channelId = idFromChannelUrl(channelUrl);
+      const avatarImg = channelHeader.querySelector<HTMLImageElement>('#avatar img, yt-avatar-shape img, .page-header-view-model-wiz__avatar img, yt-img-shadow img');
+      const subText = channelHeader.querySelector<HTMLElement>('#subscriber-count, .page-header-view-model-wiz__page-header-content-metadata span, yt-formatted-string#subscriber-count')?.textContent ?? '';
+      return {
+        id: channelId,
+        title: channelTitle,
+        url: channelUrl,
+        thumbnailUrl: avatarImg?.src || undefined,
+        subscriberCount: parseCompactNumber(subText),
+        lastSeenAt: discoveredAt,
+        status: 'active',
+        tags: []
+      };
+    }
+  }
+
+  return null;
+}
+
+
