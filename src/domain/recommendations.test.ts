@@ -18,6 +18,13 @@ describe('recommendVideos', () => {
     expect(recommendVideos(state, state.videos, NOW).map((item) => item.video.id)).toEqual(['recent']);
   });
 
+  it('does not treat discovery time as publication time', () => {
+    const state = createInitialState();
+    const unknownAge = { ...video('unknown', 'c1', 'Old rediscovered upload', '2026-08-09T10:00:00Z', 1_000_000), publishedAt: undefined };
+    state.videos = [unknownAge];
+    expect(recommendVideos(state, state.videos, NOW)).toEqual([]);
+  });
+
   it('uses watch and not-interested history to personalize ranking', () => {
     const watched = video('watched', 'tech', 'React TypeScript tutorial', '2026-08-08T10:00:00Z', 100);
     const rejected = video('rejected', 'games', 'Gaming highlights', '2026-08-08T10:00:00Z', 100);

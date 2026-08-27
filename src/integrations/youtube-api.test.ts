@@ -30,26 +30,40 @@ describe('fetchUploadFeed', () => {
   it('skips a missing uploads playlist and continues with healthy channels', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('{"error":"missing"}', { status: 404 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'video-1' }, snippet: { title: 'Video', channelTitle: 'Good', publishedAt: '2026-01-01T00:00:00Z' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'video-1', videoPublishedAt: '2026-01-01T00:00:00Z' }, snippet: { title: 'Video', channelTitle: 'Good', publishedAt: '2026-08-01T00:00:00Z' } }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: 'video-1', contentDetails: { duration: 'PT2M' }, statistics: { viewCount: '42' }, snippet: { liveBroadcastContent: 'none' } }] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchUploadFeed('token', [channel('bad', 'UU-bad'), channel('good', 'UU-good')]);
 
     expect(result.videos).toHaveLength(1);
+    expect(result.videos[0]).toMatchObject({ publishedAt: '2026-01-01T00:00:00Z', thumbnailUrl: 'https://i.ytimg.com/vi/video-1/hqdefault.jpg' });
     expect(result.skippedChannels).toMatchObject([{ channelId: 'bad', playlistId: 'UU-bad' }]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('does not classify an ended live stream as currently live', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'ended-live' }, snippet: { title: 'Ended stream', channelTitle: 'Channel', publishedAt: '2026-01-01T00:00:00Z' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ contentDetails: { videoId: 'ended-live', videoPublishedAt: '2026-01-01T00:00:00Z' }, snippet: { title: 'Ended stream', channelTitle: 'Channel', publishedAt: '2026-08-01T00:00:00Z' } }] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: 'ended-live', contentDetails: { duration: 'PT1H' }, snippet: { liveBroadcastContent: 'none' }, liveStreamingDetails: { actualEndTime: '2026-01-01T01:00:00Z' } }] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await fetchUploadFeed('token', [channel('channel', 'UU-channel')]);
 
     expect(result.videos[0]?.contentType).toBe('video');
+  });
+
+  it('excludes an old video even when the playlist item was added recently', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ items: [{
+      contentDetails: { videoId: 'old-video', videoPublishedAt: '2019-01-01T00:00:00Z' },
+      snippet: { title: 'Old upload', channelTitle: 'Channel', publishedAt: '2026-08-19T12:09:00Z' }
+    }] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchUploadFeed('token', [channel('channel', 'UU-channel')]);
+
+    expect(result.videos).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

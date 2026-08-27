@@ -1,5 +1,6 @@
 import type { AppState, Channel, FeedFilter, Group, Video } from './types';
 import { PRODUCTION_CLOUD_API_BASE_URL } from '../config';
+import { videoThumbnailUrl } from './video';
 
 export const STORAGE_KEY = 'youtube-collections-state-v1';
 export const MAX_CACHED_VIDEOS = 8_000;
@@ -123,6 +124,7 @@ export function mergeDiscoveredVideos(items: Video[], discovered: Video[]): Vide
     map.set(item.id, {
       ...current,
       ...item,
+      thumbnailUrl: videoThumbnailUrl({ id: item.id, thumbnailUrl: item.thumbnailUrl ?? current?.thumbnailUrl }),
       discoveredAt: current?.discoveredAt ?? item.discoveredAt,
       publishedAt: item.publishedAt ?? current?.publishedAt
     });
@@ -146,7 +148,9 @@ export function isValidCachedVideo(video: Video): boolean {
 
 export function sanitizeVideoCache(state: AppState): AppState {
   const canonicalChannelIds = new Set(state.channels.filter((channel) => channel.id.startsWith('UC')).map((channel) => channel.id));
-  const videos = state.videos.filter((video) => isValidCachedVideo(video) && (!canonicalChannelIds.size || canonicalChannelIds.has(video.channelId)));
+  const videos = state.videos
+    .filter((video) => isValidCachedVideo(video) && (!canonicalChannelIds.size || canonicalChannelIds.has(video.channelId)))
+    .map((video) => ({ ...video, thumbnailUrl: videoThumbnailUrl(video) }));
   const keepChannelIds = canonicalChannelIds.size ? canonicalChannelIds : new Set(videos.map((video) => video.channelId));
   const channels = state.channels.filter((channel) => keepChannelIds.has(channel.id));
   const watchLater = state.preferenceSignals?.watchLater.filter(isValidCachedVideo) ?? [];

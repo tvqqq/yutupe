@@ -39,14 +39,14 @@ export function recommendVideos(state: AppState, videos: Video[], now = Date.now
   }
 
   const candidates = videos.filter((video) => {
-    const published = Date.parse(video.publishedAt ?? video.discoveredAt);
+    const published = Date.parse(video.publishedAt ?? '');
     const age = now - published;
     return Number.isFinite(published) && age >= -DAY && age <= 30 * DAY && !state.videoStates[video.id]?.hiddenAt;
   });
   if (!candidates.length) return [];
 
   const metrics = candidates.map((video) => {
-    const ageHours = Math.max(1, (now - Date.parse(video.publishedAt ?? video.discoveredAt)) / 3_600_000);
+    const ageHours = Math.max(1, (now - Date.parse(video.publishedAt!)) / 3_600_000);
     const views = Math.max(0, video.viewCount ?? 0);
     return { video, popularity: Math.log10(views + 1), velocity: Math.log10(views / ageHours + 1), ageHours };
   });

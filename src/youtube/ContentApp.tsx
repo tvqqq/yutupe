@@ -62,20 +62,42 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
   }, []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open && !quickChannel) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        closePage();
-        return;
+        if (quickChannel) {
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+          setQuickChannel(null);
+          return;
+        }
+        if (open) {
+          closePage();
+          return;
+        }
       }
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.closest('.ytc-quick-modal-card') || target.closest('.ytc-root'))) {
         event.stopPropagation();
+        event.stopImmediatePropagation();
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.closest('.ytc-quick-modal-card') || target.closest('.ytc-root'))) {
+        event.stopPropagation();
+        event.stopImmediatePropagation();
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [open]);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('keypress', handleKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('keypress', handleKeyUp, true);
+    };
+  }, [open, quickChannel]);
 
   const closePage = () => {
     if (location.hash !== EXTENSION_ROUTE_HASH) return setOpen(false);
@@ -101,7 +123,6 @@ export default function ContentApp({ openEvent }: { openEvent: string }) {
             state={state}
             act={act}
             onClose={() => setQuickChannel(null)}
-            onOpenDashboard={openDashboard}
           />
         </div>
       )}

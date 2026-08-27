@@ -76,6 +76,7 @@ describe('state helpers', () => {
     const rescannedChannel = { ...currentChannel, lastSeenAt: 'new', tags: [] };
     expect(mergeDiscoveredChannels([currentChannel], [rescannedChannel])[0]?.tags).toEqual(['custom']);
     expect(mergeDiscoveredVideos([videos[0]!], [{ ...videos[0]!, discoveredAt: '2026-02-01T00:00:00Z' }])[0]?.discoveredAt).toBe('2026-01-02T00:00:00Z');
+    expect(mergeDiscoveredVideos([], [videos[0]!])[0]?.thumbnailUrl).toBe('https://i.ytimg.com/vi/a/hqdefault.jpg');
   });
 
   it('removes non-subscription channels, videos and group assignments', () => {
@@ -104,6 +105,7 @@ describe('state helpers', () => {
     const result = sanitizeVideoCache(current);
 
     expect(result.videos.map((video) => video.id)).toEqual(['abcdefghijk']);
+    expect(result.videos[0]?.thumbnailUrl).toBe('https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg');
     expect(result.channels.map((channel) => channel.id)).toEqual([canonicalId]);
     expect(result.videoStates).toEqual({});
   });

@@ -1,4 +1,5 @@
 import type { Channel, ContentType, Video } from '@/src/domain/types';
+import { youtubeThumbnailUrl } from '../domain/video';
 
 const API = 'https://www.googleapis.com/youtube/v3';
 const PERSONALIZATION_MIN_LONG_FORM_SECONDS = 180;
@@ -129,7 +130,7 @@ function parseChannelFeed(xml: string, channel: Channel, limit: number): Video[]
     const publishedAt = xmlText(entry, 'published');
     if (!id || !title || !publishedAt) return [];
     const thumbnailUrl = entry.match(/<media:thumbnail[^>]+url="([^"]+)"/i)?.[1];
-    return [{ id, title, url: `https://www.youtube.com/watch?v=${id}`, thumbnailUrl: thumbnailUrl ? decodeXml(thumbnailUrl) : undefined, channelId: channel.id, channelTitle: channel.title, publishedAt, contentType: 'video' as const, discoveredAt: new Date().toISOString() }];
+    return [{ id, title, url: `https://www.youtube.com/watch?v=${id}`, thumbnailUrl: thumbnailUrl ? decodeXml(thumbnailUrl) : youtubeThumbnailUrl(id), channelId: channel.id, channelTitle: channel.title, publishedAt, contentType: 'video' as const, discoveredAt: new Date().toISOString() }];
   });
 }
 
@@ -194,7 +195,7 @@ export async function fetchUploadFeed(accessToken: string, channels: Channel[], 
       const params = new URLSearchParams({ part: 'snippet,contentDetails', playlistId: channel.uploadsPlaylistId, maxResults: String(Math.min(50, perChannel - channelItemCount)) });
       if (pageToken) params.set('pageToken', pageToken);
       let page: { items?: Array<{
-        contentDetails?: { videoId?: string };
+        contentDetails?: { videoId?: string; videoPublishedAt?: string };
         snippet: { title: string; channelId?: string; channelTitle: string; publishedAt: string; thumbnails?: Record<string, { url: string }>; resourceId?: { videoId?: string } };
       }>; nextPageToken?: string };
       try { apiRequests += 1; page = await apiJson(`${API}/playlistItems?${params}`, accessToken); }
@@ -206,13 +207,18 @@ export async function fetchUploadFeed(accessToken: string, channels: Channel[], 
       const items = page.items ?? [];
       channelItemCount += items.length;
       for (const item of items) {
-        const published = Date.parse(item.snippet.publishedAt);
-        if (published < cutoff) continue;
+        const publishedAt = item.contentDetails?.videoPublishedAt;
+        if (!publishedAt) continue;
+        const published = Date.parse(publishedAt);
+        if (!Number.isFinite(published) || published < cutoff) continue;
         const id = item.contentDetails?.videoId ?? item.snippet.resourceId?.videoId;
         if (!id || item.snippet.title === 'Deleted video' || item.snippet.title === 'Private video') continue;
-        snippets.push({ id, title: item.snippet.title, channelId: channel.id, channelTitle: channel.title, publishedAt: item.snippet.publishedAt, thumbnailUrl: thumbnail(item.snippet.thumbnails) });
+        snippets.push({ id, title: item.snippet.title, channelId: channel.id, channelTitle: channel.title, publishedAt, thumbnailUrl: thumbnail(item.snippet.thumbnails) ?? youtubeThumbnailUrl(id) });
       }
-      const reachedYear = items.some((item) => Date.parse(item.snippet.publishedAt) < cutoff);
+      const reachedYear = items.some((item) => {
+        const published = Date.parse(item.contentDetails?.videoPublishedAt ?? '');
+        return Number.isFinite(published) && published < cutoff;
+      });
       pageToken = reachedYear ? '' : page.nextPageToken ?? '';
     } while (pageToken && channelItemCount < perChannel);
   }
@@ -254,7 +260,7 @@ export async function fetchSuggestedVideos(accessToken: string, query: string): 
     const durationSeconds = parseIsoDuration(detail?.contentDetails?.duration);
     const live = detail?.liveStreamingDetails?.actualEndTime ? 'ended' : detail?.snippet?.liveBroadcastContent;
     const contentType = live === 'live' ? 'live' : live === 'upcoming' ? 'upcoming' : (durationSeconds ?? 999) <= 60 ? 'short' : 'video';
-    return { id, title: item.snippet.title, url: `https://www.youtube.com/watch?v=${id}`, thumbnailUrl: thumbnail(item.snippet.thumbnails), channelId: item.snippet.channelId, channelTitle: item.snippet.channelTitle, publishedAt: item.snippet.publishedAt, durationSeconds, viewCount: detail?.statistics?.viewCount ? Number(detail.statistics.viewCount) : undefined, contentType, discoveredAt: new Date().toISOString() } satisfies Video;
+    return { id, title: item.snippet.title, url: `https://www.youtube.com/watch?v=${id}`, thumbnailUrl: thumbnail(item.snippet.thumbnails) ?? youtubeThumbnailUrl(id), channelId: item.snippet.channelId, channelTitle: item.snippet.channelTitle, publishedAt: item.snippet.publishedAt, durationSeconds, viewCount: detail?.statistics?.viewCount ? Number(detail.statistics.viewCount) : undefined, contentType, discoveredAt: new Date().toISOString() } satisfies Video;
   }).filter((video) => video.contentType !== 'short' && (video.durationSeconds ?? 0) > PERSONALIZATION_MIN_LONG_FORM_SECONDS);
 }
 
@@ -277,7 +283,7 @@ export async function fetchLikedVideos(accessToken: string, limit = 100): Promis
     for (const item of page.items ?? []) {
       const durationSeconds = parseIsoDuration(item.contentDetails?.duration);
       if ((durationSeconds ?? 0) <= PERSONALIZATION_MIN_LONG_FORM_SECONDS) continue;
-      videos.push({ id: item.id, title: item.snippet.title, url: `https://www.youtube.com/watch?v=${item.id}`, thumbnailUrl: thumbnail(item.snippet.thumbnails), channelId: item.snippet.channelId, channelTitle: item.snippet.channelTitle, publishedAt: item.snippet.publishedAt, durationSeconds, viewCount: item.statistics?.viewCount ? Number(item.statistics.viewCount) : undefined, contentType: 'video', discoveredAt: new Date().toISOString() });
+      videos.push({ id: item.id, title: item.snippet.title, url: `https://www.youtube.com/watch?v=${item.id}`, thumbnailUrl: thumbnail(item.snippet.thumbnails) ?? youtubeThumbnailUrl(item.id), channelId: item.snippet.channelId, channelTitle: item.snippet.channelTitle, publishedAt: item.snippet.publishedAt, durationSeconds, viewCount: item.statistics?.viewCount ? Number(item.statistics.viewCount) : undefined, contentType: 'video', discoveredAt: new Date().toISOString() });
     }
     pageToken = page.nextPageToken ?? '';
   } while (pageToken && videos.length < limit);

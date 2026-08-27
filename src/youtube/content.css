@@ -283,30 +283,3 @@
   color: #031317;
   border-color: var(--brand, #22d3ee);
 }
-
-.ytc-quick-modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 10px 14px;
-  border-top: 1px solid var(--line, rgba(255, 255, 255, 0.08));
-  background: var(--surface-2, #1c2029);
-}
-
-.ytc-quick-open-dashboard-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 0;
-  color: var(--brand, #22d3ee);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 6px;
-}
-
-.ytc-quick-open-dashboard-btn:hover {
-  background: rgba(34, 211, 238, 0.1);
-}

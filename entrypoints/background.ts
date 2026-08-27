@@ -46,9 +46,18 @@ function withQuotaStatus(state: AppState, exhausted: boolean): AppState {
 async function readState(): Promise<AppState> {
   const stored = await browser.storage.local.get(STORAGE_KEY);
   let state = (stored[STORAGE_KEY] as AppState | undefined) ?? createInitialState();
-  if (state.settings.cacheSanitizerVersion !== 2) {
+  if (state.settings.cacheSanitizerVersion !== 3) {
     const sanitized = sanitizeVideoCache(state);
-    state = { ...sanitized, settings: { ...sanitized.settings, cacheSanitizerVersion: 2 }, updatedAt: nowIso() };
+    // v2 persisted playlistItems.snippet.publishedAt, which is the date an item
+    // was added to the uploads playlist rather than the video's publication date.
+    // The original date cannot be reconstructed offline, so invalidate only the
+    // recoverable feed cache and let enrichment refill it with canonical dates.
+    state = queueChannelsForEnrichment({
+      ...sanitized,
+      videos: [],
+      channels: sanitized.channels.map((channel) => ({ ...channel, lastPublishedAt: undefined }))
+    }, [], true);
+    state = { ...state, settings: { ...state.settings, cacheSanitizerVersion: 3 }, updatedAt: nowIso() };
     await browser.storage.local.set({ [STORAGE_KEY]: state });
   }
   if (state.settings.enrichmentStatus === 'running' && state.channels.some((channel) => !channel.enrichment)) state = queueChannelsForEnrichment(state);

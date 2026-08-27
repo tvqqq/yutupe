@@ -18,10 +18,9 @@ interface QuickGroupModalProps {
   state: AppState;
   act: (message: AppMessage) => Promise<unknown>;
   onClose: () => void;
-  onOpenDashboard?: () => void;
 }
 
-export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard }: QuickGroupModalProps) {
+export function QuickGroupModal({ channel, state, act, onClose }: QuickGroupModalProps) {
   const [newGroupName, setNewGroupName] = useState('');
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -41,6 +40,24 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
   useEffect(() => {
     return () => {
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    };
+  }, []);
+
+  // Isolate input element from YouTube shortcut handlers
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const stop = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    };
+    el.addEventListener('keydown', stop, true);
+    el.addEventListener('keyup', stop, true);
+    el.addEventListener('keypress', stop, true);
+    return () => {
+      el.removeEventListener('keydown', stop, true);
+      el.removeEventListener('keyup', stop, true);
+      el.removeEventListener('keypress', stop, true);
     };
   }, []);
 
@@ -137,6 +154,7 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
+        event.stopImmediatePropagation();
         onClose();
       }
     };
@@ -148,6 +166,13 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
     ? `${Intl.NumberFormat('vi-VN', { notation: 'compact', maximumFractionDigits: 1 }).format(channel.subscriberCount)} subscribers`
     : null;
 
+  const stopEvent = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    if ('nativeEvent' in e && e.nativeEvent) {
+      (e.nativeEvent as Event).stopImmediatePropagation?.();
+    }
+  };
+
   return (
     <div className="ytc-quick-modal-backdrop" onClick={onClose}>
       <div
@@ -156,6 +181,9 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
         aria-modal="true"
         aria-label="Add channel to groups"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={stopEvent}
+        onKeyUp={stopEvent}
+        onKeyPress={stopEvent}
       >
         {/* Header */}
         <header className="ytc-quick-modal-header">
@@ -239,6 +267,9 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
             placeholder="+ Tạo group mới… (nhập tên & Enter)"
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
+            onKeyDown={stopEvent}
+            onKeyUp={stopEvent}
+            onKeyPress={stopEvent}
             disabled={pending}
           />
           <button
@@ -251,21 +282,6 @@ export function QuickGroupModal({ channel, state, act, onClose, onOpenDashboard 
             <span>Tạo</span>
           </button>
         </form>
-
-        {/* Footer */}
-        <footer className="ytc-quick-modal-footer">
-          <button
-            type="button"
-            className="ytc-quick-open-dashboard-btn"
-            onClick={() => {
-              onClose();
-              onOpenDashboard?.();
-            }}
-          >
-            <Sparkles size={14} />
-            <span>Mở YouTube Collections</span>
-          </button>
-        </footer>
       </div>
     </div>
   );

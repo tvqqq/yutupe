@@ -44,7 +44,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .small { min-height: 32px; padding: 0 11px; font-size: 12px; }
 
-.group-strip { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+.group-strip { display: flex; flex-wrap: wrap; gap: 8px 7px; padding-bottom: 3px; }
 .chip { flex: 0 0 auto; height: 34px; padding: 0 11px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 700; }
 .chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .group-icon { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; flex: 0 0 auto; font-size: 14px; }

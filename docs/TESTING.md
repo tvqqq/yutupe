@@ -13,6 +13,8 @@ pnpm cloud:check
 
 Unit tests hiện bao phủ domain feed, metadata parser và Drive snapshot apply.
 
+Regression tests cũng phải xác nhận `playlistItems.snippet.publishedAt` không được dùng làm ngày phát hành, video thiếu ngày phát hành thật không lọt vào AI Recommend 30 ngày, và video thiếu thumbnail metadata nhận YouTube thumbnail fallback.
+
 ## Manual Chrome/Edge smoke test
 
 1. Load unpacked build.

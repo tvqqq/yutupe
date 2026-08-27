@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { selectFeed } from '@/src/domain/state';
 import { groupFeedSections } from '@/src/domain/feed-sections';
 import { recommendVideos, type VideoRecommendation } from '@/src/domain/recommendations';
+import { videoThumbnailUrl, youtubeThumbnailUrl } from '../domain/video';
 import type { AppState, ContentType, FeedFilter, Group, Video } from '@/src/domain/types';
 import type { AppMessage } from '@/src/domain/messages';
 import { useYutupeHotkeys } from './hotkeys';
@@ -84,7 +85,10 @@ function formatPublishedAt(video: Video): string {
 export function VideoCard({ video, watched, recommendation, onAction }: { video: Video; watched: boolean; recommendation?: VideoRecommendation; onAction: (message: AppMessage) => void | Promise<unknown> }) {
   return <article className={watched ? 'video-card watched' : 'video-card'} data-video-id={video.id}>
     <a href={video.url} target="_blank" rel="noreferrer" className="thumb" onClick={() => onAction({ type: 'MARK_WATCHED', payload: { videoId: video.id, watched: true } })}>
-      {video.thumbnailUrl ? <img src={video.thumbnailUrl} alt="" /> : <span className="thumb-fallback"><Play /></span>}
+      <img src={videoThumbnailUrl(video)} alt="" onError={(event) => {
+        const fallback = youtubeThumbnailUrl(video.id);
+        if (event.currentTarget.src !== fallback) event.currentTarget.src = fallback;
+      }} />
       {formatDuration(video.durationSeconds) && <span className="duration">{formatDuration(video.durationSeconds)}</span>}
       {video.contentType !== 'video' && <span className={`content-badge ${video.contentType}`}>{video.contentType}</span>}
       {recommendation && <span className="ai-recommend-badge" tabIndex={0} aria-label={`AI đề xuất: ${recommendation.reasons.join(' · ')}`} data-tooltip={recommendation.reasons.join(' · ')}><Sparkles size={12} /><span>AI</span></span>}
