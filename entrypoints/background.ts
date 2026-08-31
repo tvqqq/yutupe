@@ -4,7 +4,7 @@ import type { AppState, Channel, Group, Video } from '@/src/domain/types';
 import { connectGoogle, disconnectGoogle, getAuthStatus, requireAccessToken, requireIdentityToken } from '@/src/integrations/google-auth';
 import { fetchPersonalizedSuggestions, fetchRecentUploadFeed, fetchSubscriptions, fetchUploadFeed, isYouTubeQuotaExceeded, unsubscribe } from '@/src/integrations/youtube-api';
 import { applyDriveSnapshot, pullFromDrive, pushToDrive } from '@/src/integrations/drive-sync';
-import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, pollCloudEvents, registerWebSub, suggestAiTags, suggestUnsubscriptionsWithAi } from '@/src/integrations/cloud-api';
+import { checkCloudHealth, getCloudStatus, organizeChannelsWithAi, suggestAiTags, suggestUnsubscriptionsWithAi } from '@/src/integrations/cloud-api';
 import { PRODUCTION_CLOUD_API_BASE_URL } from '@/src/config';
 
 function nextYouTubeQuotaReset(now = new Date()): string {
@@ -382,15 +382,6 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       return { ok: true, state, data };
     }
 
-    if (message.type === 'REGISTER_WEBSUB') {
-      const channelIds = state.channels.filter((channel) => channel.id.startsWith('UC')).map((channel) => channel.id);
-      const result = await registerWebSub(state.settings.cloudApiBaseUrl, await requireIdentityToken(), channelIds);
-      const status = await getCloudStatus(state.settings.cloudApiBaseUrl, await requireIdentityToken());
-      state = { ...state, settings: { ...state.settings, cloudHealthy: status.ok, cloudAiConfigured: status.aiConfigured, cloudAiModel: status.aiModel, webSubRegisteredCount: status.subscriptions, webSubActiveCount: status.activeSubscriptions, webSubPendingCount: status.pendingSubscriptions, lastWebSubRegistrationAt: nowIso() } };
-      const saved = await writeState(state);
-      return { ok: true, state: saved, data: { ...result, status } };
-    }
-
     if (message.type === 'CHECK_CLOUD_STATUS') {
       const origin = new URL(state.settings.cloudApiBaseUrl).origin;
       const permissionGranted = await browser.permissions.contains({ origins: [`${origin}/*`] });
@@ -401,22 +392,9 @@ async function handleMessage(message: AppMessage): Promise<AppResponse> {
       }
       const health = await checkCloudHealth(state.settings.cloudApiBaseUrl);
       const status = await getCloudStatus(state.settings.cloudApiBaseUrl, await requireIdentityToken());
-      state = { ...state, settings: { ...state.settings, cloudPermissionGranted: true, cloudHealthy: health.ok && status.ok, cloudAiConfigured: status.aiConfigured, cloudAiModel: status.aiModel, webSubRegisteredCount: status.subscriptions, webSubActiveCount: status.activeSubscriptions, webSubPendingCount: status.pendingSubscriptions } };
+      state = { ...state, settings: { ...state.settings, cloudPermissionGranted: true, cloudHealthy: health.ok && status.ok, cloudAiConfigured: status.aiConfigured, cloudAiModel: status.aiModel } };
       const saved = await writeState(state);
       return { ok: true, state: saved, data: { permissionGranted: true, health, status } };
-    }
-
-    if (message.type === 'POLL_CLOUD_EVENTS') {
-      const result = await pollCloudEvents(state.settings.cloudApiBaseUrl, await requireIdentityToken(), state.settings.cloudEventCursor);
-      const subscribedIds = new Set(state.channels.map((channel) => channel.id));
-      const acceptedEvents = result.events.filter((event) => subscribedIds.has(event.video.channelId));
-      const fresh = acceptedEvents.map((event) => event.video).filter((video) => !state.videos.some((item) => item.id === video.id));
-      state = {
-        ...state,
-        videos: mergeDiscoveredVideos(state.videos, acceptedEvents.map((event) => event.video)).slice(0, MAX_CACHED_VIDEOS),
-        settings: { ...state.settings, cloudEventCursor: result.cursor ?? state.settings.cloudEventCursor, lastCloudPollAt: nowIso() }
-      };
-      await maybeNotify(state, fresh);
     }
 
     if (message.type === 'UPSERT_GROUP') {
@@ -570,7 +548,7 @@ export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(async () => {
     const current = await browser.storage.local.get(STORAGE_KEY);
     if (!current[STORAGE_KEY]) await writeState(createInitialState());
-    await browser.alarms.create('youtube-collections-cloud-events', { periodInMinutes: 5 });
+    await browser.alarms.clear('youtube-collections-cloud-events');
   });
 
   type QueuedMessage = { message: AppMessage; resolve: (response: AppResponse) => void };
@@ -632,7 +610,10 @@ export default defineBackground(() => {
     } finally { enrichmentRunnerActive = false; }
   };
 
-  browser.runtime.onStartup.addListener(() => { void scheduleNextEnrichment(); });
+  browser.runtime.onStartup.addListener(() => {
+    void browser.alarms.clear('youtube-collections-cloud-events');
+    void scheduleNextEnrichment();
+  });
 
   browser.action.onClicked.addListener(async (tab) => {
     if (!tab.id || !tab.url?.startsWith('https://www.youtube.com/')) return;
@@ -649,12 +630,6 @@ export default defineBackground(() => {
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'youtube-collections-enrichment') {
       void runEnrichmentBatch();
-      return;
     }
-    if (alarm.name !== 'youtube-collections-cloud-events') return;
-    void readState().then(async (state) => {
-      if (!state.settings.cloudApiBaseUrl || !(await getAuthStatus()).connected) return;
-      await handleMessage({ type: 'POLL_CLOUD_EVENTS' });
-    }).catch(() => undefined);
   });
 });

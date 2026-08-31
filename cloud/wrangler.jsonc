@@ -8,23 +8,11 @@
   "ai": {
     "binding": "AI"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "youtube-collections-cloud",
-      "database_id": "9ff9e721-39d5-4b78-9ae5-0cddbd74a5e3",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "triggers": {
-    "crons": ["* * * * *"]
-  },
   "vars": {
     "GOOGLE_CLIENT_IDS": "338607738588-qjthn64gvhrlqene5nkv849spn0if2l0.apps.googleusercontent.com,338607738588-elt9n1cr7158eiekh0f0g7dmocs59t3s.apps.googleusercontent.com,338607738588-snr609t5q1terbfkkd6rlospsdjqf28h.apps.googleusercontent.com",
     "PUBLIC_BASE_URL": "https://youtube-collections-cloud.qeoqeo.workers.dev",
     "EXTENSION_ORIGINS": "chrome-extension://behfooaigccbooibiabffaehejiagcbi,chrome-extension://epifobbmlacfdlhlcfmjmlppneopahij,chrome-extension://bpmmgamahkaebpdedlcflfjkhpmpfdka,moz-extension://*",
     "OPENAI_MODEL": "gpt-5.6",
-    "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast",
-    "WEBSUB_HUB_URL": "https://pubsubhubbub.appspot.com/subscribe"
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.1-8b-instruct-fast"
   }
 }

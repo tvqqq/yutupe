@@ -1,20 +1,6 @@
-interface D1Result<T = unknown> { results?: T[]; success: boolean; error?: string; meta?: Record<string, unknown> }
-interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  first<T = Record<string, unknown>>(): Promise<T | null>;
-  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-}
-interface D1Database {
-  prepare(query: string): D1PreparedStatement;
-  batch<T = unknown>(statements: D1PreparedStatement[]): Promise<Array<D1Result<T>>>;
-}
-interface WorkerExecutionContext { waitUntil(promise: Promise<unknown>): void }
-interface ScheduledEvent { scheduledTime: number; cron: string }
 interface WorkersAiBinding { run(model: string, input: Record<string, unknown>): Promise<unknown> }
 
 export interface Env {
-  DB: D1Database;
   AI?: WorkersAiBinding;
   GOOGLE_CLIENT_IDS: string;
   SESSION_SECRET: string;
@@ -23,8 +9,6 @@ export interface Env {
   OPENAI_API_KEY?: string;
   OPENAI_MODEL?: string;
   WORKERS_AI_MODEL?: string;
-  WEBSUB_SECRET: string;
-  WEBSUB_HUB_URL?: string;
 }
 
 interface Identity { sub: string; email?: string; exp: number }
@@ -156,19 +140,19 @@ async function readJson<T>(request: Request, maxBytes = 1_000_000): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-async function saveUser(identity: Identity, env: Env): Promise<void> {
-  const now = new Date().toISOString();
-  await env.DB.prepare(`INSERT INTO users(id,email,created_at,last_seen_at) VALUES(?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET email=excluded.email,last_seen_at=excluded.last_seen_at`).bind(identity.sub, identity.email ?? null, now, now).run();
-}
+const memoryRateLimits = new Map<string, { count: number; expiresAt: number }>();
 
-async function rateLimit(identity: Identity, env: Env, bucket: string, limit: number): Promise<boolean> {
-  const window = Math.floor(Date.now() / 60_000);
-  const key = `${identity.sub}:${bucket}:${window}`;
-  await env.DB.prepare(`INSERT INTO rate_limits(id,count,expires_at) VALUES(?,1,?)
-    ON CONFLICT(id) DO UPDATE SET count=count+1`).bind(key, Date.now() + 120_000).run();
-  const row = await env.DB.prepare('SELECT count FROM rate_limits WHERE id=?').bind(key).first<{ count: number }>();
-  return (row?.count ?? limit + 1) <= limit;
+function rateLimit(identity: Identity, bucket: string, limit: number): boolean {
+  const now = Date.now();
+  const key = `${identity.sub}:${bucket}`;
+  const record = memoryRateLimits.get(key);
+  if (!record || record.expiresAt < now) {
+    memoryRateLimits.set(key, { count: 1, expiresAt: now + 60_000 });
+    return true;
+  }
+  if (record.count >= limit) return false;
+  record.count += 1;
+  return true;
 }
 
 function outputText(response: { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> }): string {
@@ -247,7 +231,7 @@ function normalizeChannels(value: unknown): ChannelInput[] {
 }
 
 async function aiTags(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  if (!(await rateLimit(identity, env, 'ai', 20))) return errorResponse('Đã vượt giới hạn AI 20 requests/phút.', 429, cors);
+  if (!rateLimit(identity, 'ai', 20)) return errorResponse('Đã vượt giới hạn AI 20 requests/phút.', 429, cors);
   const body = await readJson<{ channel?: ChannelInput }>(request);
   const channel = normalizeChannels(body.channel ? [body.channel] : [])[0];
   if (!channel) return errorResponse('Thiếu channel.', 400, cors);
@@ -257,7 +241,7 @@ async function aiTags(request: Request, env: Env, identity: Identity, cors: Head
 }
 
 async function aiUnsubscribeSuggestions(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  if (!(await rateLimit(identity, env, 'ai-unsubscribe', 8))) return errorResponse('Đã vượt giới hạn phân tích AI 8 requests/phút.', 429, cors);
+  if (!rateLimit(identity, 'ai-unsubscribe', 8)) return errorResponse('Đã vượt giới hạn phân tích AI 8 requests/phút.', 429, cors);
   const body = await readJson<{ signals?: Array<{ channelId?: string; channelTitle?: string; rejectedCount?: number; cachedCount?: number; rejectedTitles?: string[] }> }>(request);
   const signals = (Array.isArray(body.signals) ? body.signals : []).slice(0, 100).flatMap((item) => {
     if (!item.channelId || !CHANNEL_ID.test(item.channelId) || !item.channelTitle) return [];
@@ -321,14 +305,11 @@ export function fallbackAiGroups(channels: ChannelInput[], extraKeywords: Record
 }
 
 async function aiGroups(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  if (!(await rateLimit(identity, env, 'ai-groups', 4))) return errorResponse('Đã vượt giới hạn AI Groups 4 requests/phút.', 429, cors);
+  if (!rateLimit(identity, 'ai-groups', 4)) return errorResponse('Đã vượt giới hạn AI Groups 4 requests/phút.', 429, cors);
   const body = await readJson<{ channels?: ChannelInput[] }>(request, 2_000_000);
   const channels = normalizeChannels(body.channels);
   if (!channels.length) return json({ groups: [] }, 200, cors);
   const taxonomy = AI_GROUP_TAXONOMY.map((group) => group.name).join(', ');
-  // Learn compact classification rules in one AI call. Classifying hundreds of
-  // channels with one call truncates JSON; one call per batch exceeds the Worker
-  // subrequest limit. Applying AI-generated rules locally avoids both failure modes.
   const sampleSize = Math.min(240, channels.length);
   const sample = Array.from({ length: sampleSize }, (_, index) => channels[Math.floor(index * channels.length / sampleSize)]!);
   let extraKeywords: Record<string, string[]> = {};
@@ -347,143 +328,17 @@ async function aiGroups(request: Request, env: Env, identity: Identity, cors: He
   return json(fallbackAiGroups(channels, extraKeywords), 200, cors);
 }
 
-function topicFor(channelId: string): string { return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`; }
-
-async function subscribeHub(channelId: string, env: Env): Promise<void> {
-  const body = new URLSearchParams({
-    'hub.callback': `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/v1/websub/callback`,
-    'hub.mode': 'subscribe',
-    'hub.topic': topicFor(channelId),
-    'hub.verify': 'async',
-    'hub.lease_seconds': '864000',
-    'hub.secret': env.WEBSUB_SECRET
-  });
-  const response = await fetch(env.WEBSUB_HUB_URL || HUB_DEFAULT, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  if (!response.ok && response.status !== 202 && response.status !== 204) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
-  await env.DB.prepare(`UPDATE channel_subscriptions SET state='verifying',last_error=NULL,attempts=attempts+1,updated_at=? WHERE channel_id=?`).bind(new Date().toISOString(), channelId).run();
+function cloudStatus(env: Env, _identity: Identity, cors: HeadersInit): Response {
+  return json({
+    ok: true,
+    aiConfigured: Boolean(env.OPENAI_API_KEY || env.AI),
+    aiModel: env.OPENAI_API_KEY ? env.OPENAI_MODEL || 'gpt-5.6' : env.WORKERS_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast'
+  }, 200, cors);
 }
 
-async function renewPending(env: Env, limit = 50): Promise<void> {
-  const threshold = new Date(Date.now() + 86_400_000).toISOString();
-  const rows = await env.DB.prepare(`SELECT channel_id FROM channel_subscriptions WHERE lease_expires_at IS NULL OR lease_expires_at<? ORDER BY updated_at ASC LIMIT ?`).bind(threshold, limit).all<{ channel_id: string }>();
-  for (const row of rows.results ?? []) {
-    try { await subscribeHub(row.channel_id, env); }
-    catch (error) { await env.DB.prepare(`UPDATE channel_subscriptions SET state='error',last_error=?,attempts=attempts+1,updated_at=? WHERE channel_id=?`).bind(error instanceof Error ? error.message.slice(0, 500) : 'Unknown error', new Date().toISOString(), row.channel_id).run(); }
-  }
-  await env.DB.prepare('DELETE FROM rate_limits WHERE expires_at<?').bind(Date.now()).run();
-  await env.DB.prepare(`DELETE FROM events WHERE created_at<?`).bind(new Date(Date.now() - 30 * 86_400_000).toISOString()).run();
-  await env.DB.prepare(`DELETE FROM channel_subscriptions WHERE NOT EXISTS (SELECT 1 FROM user_channels WHERE user_channels.channel_id=channel_subscriptions.channel_id)`).run();
-}
-
-async function registerChannels(request: Request, env: Env, identity: Identity, cors: HeadersInit, ctx: WorkerExecutionContext): Promise<Response> {
-  const body = await readJson<{ channelIds?: string[] }>(request);
-  const channelIds = [...new Set(body.channelIds ?? [])];
-  if (!channelIds.length || channelIds.length > 2000 || channelIds.some((id) => !CHANNEL_ID.test(id))) return errorResponse('channelIds không hợp lệ (1-2.000 IDs).', 400, cors);
-  const now = new Date().toISOString();
-  // Treat registration as a full snapshot so channels unsubscribed on YouTube stop producing events for this user.
-  await env.DB.prepare('DELETE FROM user_channels WHERE user_id=?').bind(identity.sub).run();
-  for (let index = 0; index < channelIds.length; index += 40) {
-    const chunk = channelIds.slice(index, index + 40);
-    await env.DB.batch([
-      ...chunk.map((id) => env.DB.prepare(`INSERT INTO channel_subscriptions(channel_id,state,attempts,updated_at) VALUES(?,'pending',0,?) ON CONFLICT(channel_id) DO NOTHING`).bind(id, now)),
-      ...chunk.map((id) => env.DB.prepare(`INSERT INTO user_channels(user_id,channel_id,created_at) VALUES(?,?,?) ON CONFLICT(user_id,channel_id) DO NOTHING`).bind(identity.sub, id, now))
-    ]);
-  }
-  ctx.waitUntil(renewPending(env, 25));
-  return json({ registered: channelIds.length, queued: channelIds.length }, 202, cors);
-}
-
-function xmlValue(xml: string, tag: string): string | undefined {
-  return xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, 'i'))?.[1]?.trim();
-}
-
-function decodeXml(value?: string): string | undefined {
-  return value?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
-}
-
-export function parseAtomVideo(xml: string): { id: string; channelId: string; title: string; channelTitle: string; publishedAt?: string; thumbnailUrl?: string } | null {
-  const entry = xml.match(/<entry(?:\s[^>]*)?>([\s\S]*?)<\/entry>/i)?.[1];
-  if (!entry) return null;
-  const id = decodeXml(xmlValue(entry, 'yt:videoId'));
-  const channelId = decodeXml(xmlValue(entry, 'yt:channelId'));
-  const title = decodeXml(xmlValue(entry, 'title'));
-  const channelTitle = decodeXml(xmlValue(entry, 'name'));
-  const publishedAt = decodeXml(xmlValue(entry, 'published'));
-  const thumbnailUrl = entry.match(/<media:thumbnail[^>]+url=["']([^"']+)["']/i)?.[1];
-  if (!id || !channelId || !CHANNEL_ID.test(channelId) || !title) return null;
-  return { id, channelId, title, channelTitle: channelTitle || channelId, publishedAt, thumbnailUrl: decodeXml(thumbnailUrl) };
-}
-
-async function verifyWebSubSignature(request: Request, body: string, env: Env): Promise<boolean> {
-  const supplied = request.headers.get('x-hub-signature')?.match(/^sha1=([a-f0-9]+)$/i)?.[1]?.toLowerCase();
-  if (!supplied) return false;
-  const bytes = await hmac(env.WEBSUB_SECRET, body, 'SHA-1');
-  const expected = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return safeEqual(supplied, expected);
-}
-
-async function webSubCallback(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  if (request.method === 'GET') {
-    const mode = url.searchParams.get('hub.mode');
-    const topic = url.searchParams.get('hub.topic') ?? '';
-    const challenge = url.searchParams.get('hub.challenge');
-    const leaseSeconds = Math.min(1_209_600, Math.max(60, Number(url.searchParams.get('hub.lease_seconds') ?? 864000)));
-    const channelId = new URL(topic).searchParams.get('channel_id');
-    if (!challenge || !channelId || !CHANNEL_ID.test(channelId) || !['subscribe', 'unsubscribe'].includes(mode ?? '')) return new Response('Invalid verification request', { status: 400 });
-    if (mode === 'subscribe') await env.DB.prepare(`UPDATE channel_subscriptions SET state='active',lease_expires_at=?,last_error=NULL,updated_at=? WHERE channel_id=?`).bind(new Date(Date.now() + leaseSeconds * 1000).toISOString(), new Date().toISOString(), channelId).run();
-    else await env.DB.prepare(`UPDATE channel_subscriptions SET state='expired',lease_expires_at=NULL,updated_at=? WHERE channel_id=?`).bind(new Date().toISOString(), channelId).run();
-    return new Response(challenge, { headers: { 'content-type': 'text/plain' } });
-  }
-  if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
-  const body = await request.text();
-  if (body.length > 256_000 || !(await verifyWebSubSignature(request, body, env))) return new Response('Invalid signature', { status: 401 });
-  const video = parseAtomVideo(body);
-  if (!video) return new Response('Ignored', { status: 202 });
-  const users = await env.DB.prepare('SELECT user_id FROM user_channels WHERE channel_id=?').bind(video.channelId).all<{ user_id: string }>();
-  const now = new Date().toISOString();
-  const eventId = `${video.channelId}:${video.id}`;
-  for (const row of users.results ?? []) await env.DB.prepare(`INSERT INTO events(id,user_id,video_id,title,url,channel_id,channel_title,thumbnail_url,published_at,discovered_at,created_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,id) DO NOTHING`).bind(eventId, row.user_id, video.id, video.title, `https://www.youtube.com/watch?v=${video.id}`, video.channelId, video.channelTitle, video.thumbnailUrl ?? null, video.publishedAt ?? null, now, now).run();
-  return new Response('Accepted', { status: 202 });
-}
-
-export function parseCursor(cursor: string | null): number {
-  if (!cursor) return 0;
-  const value = Number.parseInt(cursor, 36);
-  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
-}
-
-async function eventsInbox(request: Request, env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  const cursor = parseCursor(new URL(request.url).searchParams.get('cursor'));
-  const rows = await env.DB.prepare(`SELECT seq,id,video_id,title,url,channel_id,channel_title,thumbnail_url,published_at,discovered_at FROM events WHERE user_id=? AND seq>? ORDER BY seq ASC LIMIT 200`).bind(identity.sub, cursor).all<{
-    seq: number; id: string; video_id: string; title: string; url: string; channel_id: string; channel_title: string; thumbnail_url?: string; published_at?: string; discovered_at: string;
-  }>();
-  const items = rows.results ?? [];
-  const next = items.length ? items[items.length - 1]!.seq.toString(36) : cursor.toString(36);
-  return json({ events: items.map((row) => ({ id: row.id, video: { id: row.video_id, title: row.title, url: row.url, thumbnailUrl: row.thumbnail_url, channelId: row.channel_id, channelTitle: row.channel_title, publishedAt: row.published_at, contentType: 'video', discoveredAt: row.discovered_at } })), cursor: next }, 200, cors);
-}
-
-async function cloudStatus(env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  const subscriptions = await env.DB.prepare(`SELECT COUNT(*) count FROM user_channels WHERE user_id=?`).bind(identity.sub).first<{ count: number }>();
-  const active = await env.DB.prepare(`SELECT COUNT(*) count FROM channel_subscriptions cs JOIN user_channels uc ON uc.channel_id=cs.channel_id WHERE uc.user_id=? AND cs.state='active'`).bind(identity.sub).first<{ count: number }>();
-  const events = await env.DB.prepare(`SELECT COUNT(*) count FROM events WHERE user_id=?`).bind(identity.sub).first<{ count: number }>();
-  return json({ ok: true, aiConfigured: Boolean(env.OPENAI_API_KEY || env.AI), aiModel: env.OPENAI_API_KEY ? env.OPENAI_MODEL || 'gpt-5.6' : env.WORKERS_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct-fast', subscriptions: subscriptions?.count ?? 0, activeSubscriptions: active?.count ?? 0, pendingSubscriptions: Math.max(0, (subscriptions?.count ?? 0) - (active?.count ?? 0)), events: events?.count ?? 0 }, 200, cors);
-}
-
-async function deleteAccount(env: Env, identity: Identity, cors: HeadersInit): Promise<Response> {
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM events WHERE user_id=?').bind(identity.sub),
-    env.DB.prepare('DELETE FROM user_channels WHERE user_id=?').bind(identity.sub),
-    env.DB.prepare('DELETE FROM users WHERE id=?').bind(identity.sub)
-  ]);
-  return json({ deleted: true }, 200, cors);
-}
-
-async function route(request: Request, env: Env, ctx: WorkerExecutionContext): Promise<Response> {
+async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/health') return json({ ok: true, service: 'youtube-collections-cloud', time: new Date().toISOString() });
-  if (url.pathname === '/v1/websub/callback') return webSubCallback(request, env);
   const cors = corsHeaders(request, env);
   if (cors === null) return errorResponse('Origin không được phép.', 403);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
@@ -492,29 +347,23 @@ async function route(request: Request, env: Env, ctx: WorkerExecutionContext): P
     if (!body.accessToken) return errorResponse('Thiếu accessToken.', 400, cors);
     const identity = await verifyGoogleToken(body.accessToken, env, 'access_token');
     if (!identity) return errorResponse('Google token không hợp lệ hoặc sai OAuth audience.', 401, cors);
-    await saveUser(identity, env);
     return json(await issueSession(identity, env), 200, cors);
   }
   const identity = await authenticate(request, env);
   if (!identity) return errorResponse('Unauthorized.', 401, cors);
-  await saveUser(identity, env);
   if (url.pathname === '/v1/status' && request.method === 'GET') return cloudStatus(env, identity, cors);
   if (url.pathname === '/v1/ai/tags' && request.method === 'POST') return aiTags(request, env, identity, cors);
   if (url.pathname === '/v1/ai/groups' && request.method === 'POST') return aiGroups(request, env, identity, cors);
   if (url.pathname === '/v1/ai/unsubscribe-suggestions' && request.method === 'POST') return aiUnsubscribeSuggestions(request, env, identity, cors);
-  if (url.pathname === '/v1/websub/subscriptions' && request.method === 'POST') return registerChannels(request, env, identity, cors, ctx);
-  if (url.pathname === '/v1/events' && request.method === 'GET') return eventsInbox(request, env, identity, cors);
-  if (url.pathname === '/v1/account' && request.method === 'DELETE') return deleteAccount(env, identity, cors);
   return errorResponse('Not found.', 404, cors);
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: WorkerExecutionContext): Promise<Response> {
-    try { return await route(request, env, ctx); }
+  async fetch(request: Request, env: Env): Promise<Response> {
+    try { return await route(request, env); }
     catch (error) {
       console.error('Request failed', new URL(request.url).pathname, error instanceof Error ? { name: error.name, message: error.message, stack: error.stack } : error);
       return errorResponse(error instanceof Error ? error.message : 'Internal error', 500, corsHeaders(request, env) ?? undefined);
     }
-  },
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: WorkerExecutionContext): Promise<void> { ctx.waitUntil(renewPending(env, 75)); }
+  }
 };

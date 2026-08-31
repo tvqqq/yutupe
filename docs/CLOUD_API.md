@@ -1,10 +1,10 @@
 # Cloud API contract
 
-Contract này được implement tại `cloud/worker.ts` bằng Cloudflare Worker + D1. Production extension chỉ gọi exact Worker origin được khai báo trong manifest.
+Contract này được implement tại `cloud/worker.ts` bằng Cloudflare Worker hoàn toàn stateless (không sử dụng database). Production extension chỉ gọi exact Worker origin được khai báo trong manifest.
 
 ## Health và status
 
-`GET /health` public dùng để kiểm tra deployment. `GET /v1/status` yêu cầu auth và trả cấu hình AI, tổng WebSub active/pending cùng event count của user.
+`GET /health` public dùng để kiểm tra deployment. `GET /v1/status` yêu cầu auth và trả cấu hình AI (`ok: true`, `aiConfigured`, `aiModel`).
 
 ## Authentication
 
@@ -21,7 +21,7 @@ Backend phải:
 
 1. Xác minh token trực tiếp với Google và kiểm tra OAuth audience/project.
 2. Không log, lưu hoặc dùng access token để gọi YouTube/Drive.
-3. Trả narrow backend session token:
+3. Trả narrow backend session token (HMAC-signed, stateless):
 
 ```json
 {"token":"cloud-session-token","expiresIn":3600}
@@ -69,46 +69,28 @@ Response:
 
 Backend chỉ được trả channel ID có trong request. Extension validate lại IDs trước khi cập nhật groups.
 
-## Register WebSub
+## AI Unsubscribe Suggestions
 
 ```http
-POST /v1/websub/subscriptions
-{"channelIds":["UC...","UC..."]}
+POST /v1/ai/unsubscribe-suggestions
 ```
 
-Response `202`: `{"registered":2,"queued":2}`. Request là snapshot đầy đủ: mapping cũ không còn trong danh sách sẽ bị bỏ. Cron xử lý hàng đợi và gia hạn lease trong nền.
+Request:
 
-Backend đăng ký topic `https://www.youtube.com/feeds/videos.xml?channel_id=CHANNEL_ID`, renew subscription và dedupe event.
-
-## Event inbox
-
-```http
-GET /v1/events?cursor=<opaque>
+```json
+{"signals":[{"channelId":"UC...","channelTitle":"...","rejectedCount":3,"cachedCount":5,"rejectedTitles":["..."]}]}
 ```
 
 Response:
 
 ```json
-{
-  "events":[
-    {"id":"event-id","video":{"id":"video-id","title":"...","url":"https://www.youtube.com/watch?v=...","channelId":"UC...","channelTitle":"...","contentType":"video","discoveredAt":"2026-08-09T00:00:00Z"}}
-  ],
-  "cursor":"next-opaque-cursor"
-}
+{"recommendations":[{"channelId":"UC...","reason":"...","confidence":0.85}]}
 ```
-
-Extension polls mỗi 5 phút khi có Cloud URL và Google session, merges event theo video ID và phát browser notification cho group tương ứng.
-
-## Data deletion
-
-`DELETE /v1/account` xóa users, channel mappings và event inbox của user đang xác thực.
 
 ## Production requirements
 
-- HTTPS, CORS/extension-origin allowlist và rate limiting.
+- HTTPS, CORS/extension-origin allowlist và in-memory rate limiting.
 - Verify auth audience/issuer/expiry.
-- D1 isolate records theo verified Google `sub`; Cloudflare chịu trách nhiệm encryption at rest của managed storage.
-- Validate channel IDs, Atom XML và event size.
-- Monitor `channel_subscriptions.state`, `attempts`, `last_error` và cron delivery failures.
+- Hoàn toàn stateless: không lưu thông tin người dùng hay truy vấn database, tối ưu chi phí và bảo mật tuyệt đối.
 
 Hướng dẫn deploy và secrets nằm tại `cloud/README.md`.

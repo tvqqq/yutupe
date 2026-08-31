@@ -75,15 +75,9 @@ export interface Settings {
   cloudHealthy?: boolean;
   cloudAiConfigured?: boolean;
   cloudAiModel?: string;
-  webSubRegisteredCount?: number;
-  webSubActiveCount?: number;
-  webSubPendingCount?: number;
-  lastWebSubRegistrationAt?: string;
-  lastCloudPollAt?: string;
   youtubeSyncChannelLimit: number;
   lastYoutubeSyncAt?: string;
   lastDriveSyncAt?: string;
-  cloudEventCursor?: string;
   enrichmentCursor?: number;
   enrichmentTotal?: number;
   enrichmentStatus?: 'idle' | 'running' | 'complete';
@@ -143,9 +137,4 @@ export interface DiscoveredPayload {
   channels: Channel[];
   videos: Video[];
   preferenceSource?: 'watch-later' | 'liked';
-}
-
-export interface CloudVideoEvent {
-  id: string;
-  video: Video;
 }

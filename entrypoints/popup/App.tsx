@@ -289,7 +289,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       const response = await act(message) as AppResponse;
       if (response.authStatus) setAuth(response.authStatus);
       if (message.type === 'CONNECT_GOOGLE' && response.authStatus?.connected) await act({ type: 'CHECK_CLOUD_STATUS' });
-      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; registered?: number; queued?: number; permissionGranted?: boolean; fileId?: string; syncedAt?: string; restoredFrom?: string; status?: { activeSubscriptions?: number; pendingSubscriptions?: number } } | undefined;
+      const feedReport = response.data as { videoCount?: number; skippedChannels?: Array<{ channelTitle: string }>; granted?: boolean; permissionGranted?: boolean; fileId?: string; syncedAt?: string; restoredFrom?: string } | undefined;
       const skipped = feedReport?.skippedChannels ?? [];
       setNotice(feedReport?.restoredFrom
         ? `Đã khôi phục backup tạo lúc ${new Intl.DateTimeFormat('vi-VN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(feedReport.restoredFrom))}.`
@@ -299,11 +299,9 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
         ? 'Cloud API production đã được xác minh và health check thành công.'
         : feedReport?.permissionGranted === false
           ? 'Origin Cloud chưa có trong manifest. Hãy reload bản extension production mới nhất.'
-          : feedReport?.registered !== undefined
-            ? `Đã đưa ${feedReport.registered} channels vào hàng đợi WebSub; active ${feedReport.status?.activeSubscriptions ?? 0}, pending ${feedReport.status?.pendingSubscriptions ?? feedReport.queued ?? 0}.`
-            : skipped.length
-              ? `${label}: tải ${feedReport?.videoCount ?? 0} video; bỏ qua ${skipped.length} channel không còn uploads playlist (${skipped.map((item) => item.channelTitle).join(', ')}).`
-              : `${label}: hoàn tất${feedReport?.videoCount !== undefined ? `, tải ${feedReport.videoCount} video` : ''}.`);
+          : skipped.length
+            ? `${label}: tải ${feedReport?.videoCount ?? 0} video; bỏ qua ${skipped.length} channel không còn uploads playlist (${skipped.map((item) => item.channelTitle).join(', ')}).`
+            : `${label}: hoàn tất${feedReport?.videoCount !== undefined ? `, tải ${feedReport.videoCount} video` : ''}.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : `${label}: thất bại.`); }
     finally { setBusy(''); }
   };
@@ -323,7 +321,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
   }, [act]);
   return <div className="integration-section">
     <div className="section-title"><div><h2>Google & Cloud integrations</h2><p>Google session được gia hạn âm thầm khi browser vẫn còn quyền truy cập.</p></div><span className={authLoading ? 'status-badge loading' : auth.connected ? 'status-badge connected' : 'status-badge'}>{authLoading ? 'Đang kiểm tra…' : auth.connected ? auth.email || 'Connected' : 'Not connected'}</span></div>
-    {authLoading ? <div className="integration-loading"><RefreshCw className="spin" size={20} /><span><strong>Đang tải Google & Cloud integrations…</strong><small>Kiểm tra OAuth session, Cloud health và WebSub status.</small></span></div> : <>
+    {authLoading ? <div className="integration-loading"><RefreshCw className="spin" size={20} /><span><strong>Đang tải Google & Cloud integrations…</strong><small>Kiểm tra OAuth session và Cloud AI status.</small></span></div> : <>
     {!manifestClientId ? (
       <div>
         <label className="form-label">
@@ -353,7 +351,7 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
     )}
     <div className={`cloud-status-card ${state.settings.cloudHealthy ? 'healthy' : ''}`}>
       <span className="cloud-status-dot" />
-      <div><strong>{state.settings.cloudHealthy ? 'Cloud đang hoạt động' : hasCloudUrl ? 'Cloud chưa được xác minh' : 'Cloud chưa cấu hình'}</strong><small>{state.settings.cloudHealthy ? `AI ${state.settings.cloudAiConfigured ? `sẵn sàng · ${state.settings.cloudAiModel ?? 'model đã cấu hình'}` : 'chưa có API key'} · WebSub ${state.settings.webSubActiveCount ?? 0} active / ${state.settings.webSubPendingCount ?? 0} pending` : 'Deploy backend, nhập HTTPS URL rồi cấp quyền cho extension.'}</small></div>
+      <div><strong>{state.settings.cloudHealthy ? 'Cloud đang hoạt động' : hasCloudUrl ? 'Cloud chưa được xác minh' : 'Cloud chưa cấu hình'}</strong><small>{state.settings.cloudHealthy ? `AI ${state.settings.cloudAiConfigured ? `sẵn sàng · ${state.settings.cloudAiModel ?? 'model đã cấu hình'}` : 'chưa có API key'}` : 'Deploy backend, nhập HTTPS URL rồi cấp quyền cho extension.'}</small></div>
     </div>
     <label className="form-label">Số channel tối đa mỗi lần refresh feed<input className="field" type="number" min="1" max="100" value={state.settings.youtubeSyncChannelLimit} onChange={(event) => void act({ type: 'UPDATE_SETTINGS', payload: { youtubeSyncChannelLimit: Math.max(1, Math.min(100, Number(event.target.value) || 25)) } })} /></label>
     <div className="integration-actions">
@@ -364,11 +362,9 @@ function IntegrationsPanel({ state, act }: { state: AppState; act: (message: App
       <button className="secondary" disabled={Boolean(busy) || !auth.connected} title="Khôi phục groups, channel assignments, watched state và một số tùy chọn từ backup mới nhất" onClick={() => confirm('Khôi phục từ Drive sẽ thay thế groups, channel assignments và watched state hiện tại. Tiếp tục?') && void run('Khôi phục từ Drive', { type: 'DRIVE_PULL' })}>{busy === 'Khôi phục từ Drive' ? <><RefreshCw className="spin" size={16} />Đang khôi phục…</> : 'Khôi phục từ Drive'}</button>
       <button className="secondary" disabled={Boolean(busy) || !hasCloudUrl} onClick={() => void run('Cloud permission', { type: 'GRANT_CLOUD_PERMISSION', payload: { baseUrl: state.settings.cloudApiBaseUrl } })}>Xác minh Cloud API</button>
       <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud status', { type: 'CHECK_CLOUD_STATUS' })}>Kiểm tra Cloud</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady || !state.channels.length} onClick={() => void run('WebSub registration', { type: 'REGISTER_WEBSUB' })}>Đăng ký WebSub</button>
-      <button className="secondary" disabled={Boolean(busy) || !auth.connected || !cloudReady} onClick={() => void run('Cloud events', { type: 'POLL_CLOUD_EVENTS' })}>Đồng bộ events</button>
     </div>
     {notice && <p className="integration-notice">{notice}</p>}
-    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · API estimate hôm nay: {state.settings.youtubeQuotaEstimatedUsed ?? 0}/8.000 soft limit · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'} · Cloud poll: {state.settings.lastCloudPollAt ?? 'chưa chạy'}</p>
+    <p className="integration-meta">YouTube sync: {state.settings.lastYoutubeSyncAt ?? 'chưa chạy'} · API estimate hôm nay: {state.settings.youtubeQuotaEstimatedUsed ?? 0}/8.000 soft limit · Drive sync: {state.settings.lastDriveSyncAt ?? 'chưa chạy'}</p>
     </>}
   </div>;
 }
@@ -429,7 +425,7 @@ function SettingsPage({ state, act }: { state: AppState; act: (message: AppMessa
 
     <div className="settings-card backup-card"><div><strong>Backup dữ liệu</strong><span>Export/import JSON gồm groups, channels và watched state.</span></div><div><button className="secondary" onClick={exportData}><Download size={16} />Export</button><button className="secondary" onClick={() => fileRef.current?.click()}><Upload size={16} />Import</button><input ref={fileRef} hidden type="file" accept="application/json" onChange={(event) => void importData(event.target.files?.[0])} /></div></div>
     <div className="settings-card danger-zone"><div><strong>Reset extension</strong><span>Xóa toàn bộ dữ liệu local. Không thể hoàn tác nếu chưa export.</span></div><button className="danger-button" onClick={() => confirm('Xóa toàn bộ dữ liệu local?') && void act({ type: 'RESET_STATE' })}><Trash2 size={16} />Reset</button></div>
-    <div className="mvp-note"><Sparkles size={18} /><div><strong>Local-first + optional cloud</strong><p>OAuth, YouTube API và Drive chạy trực tiếp với Google. AI/WebSub dùng Cloud API riêng để giữ secret và webhook ngoài extension.</p></div></div>
+    <div className="mvp-note"><Sparkles size={18} /><div><strong>Local-first + Cloud AI</strong><p>OAuth, YouTube API và Drive chạy trực tiếp với Google. Cloud AI dùng API riêng để giữ AI API keys an toàn ngoài extension.</p></div></div>
     <IntegrationsPanel state={state} act={act} />
   </section>;
 }

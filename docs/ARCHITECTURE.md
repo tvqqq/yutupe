@@ -9,11 +9,9 @@ flowchart LR
   B --> L[storage.local app state]
   B --> S[storage.session tokens]
   B --> G[Google OAuth / YouTube / Drive]
-  B --> API[Optional AI and WebSub API]
+  B --> API[Stateless AI Worker]
   B --> N[Browser notifications]
   API --> O[Workers AI / optional OpenAI]
-  API --> D[D1 users subscriptions events]
-  H[YouTube WebSub Hub] --> API
 ```
 
 ## Runtime boundaries
@@ -36,8 +34,7 @@ Background xử lý:
 - DOM discovery merge và canonical channel migration.
 - OAuth session, YouTube API, Drive sync và cloud adapters.
 - Bulk unsubscribe tuần tự.
-- Cloud event polling và notifications.
-- Subscription sync hai phase: phase nhanh import subscriptions/channel metadata theo batch; phase nền dùng `browser.alarms` để enrich 10 uploads playlists mỗi lượt.
+- Subscription sync hai phase: phase nhanh import subscriptions/channel metadata theo batch; phase nền dùng `browser.alarms` để enrich uploads playlists qua RSS/Data API.
 
 OAuth tokens không bao giờ được gửi vào YouTube page context.
 
@@ -46,7 +43,7 @@ OAuth tokens không bao giờ được gửi vào YouTube page context.
 - DOM adapter: fallback/local discovery.
 - YouTube API: subscriptions, canonical channels, uploads playlists và video details.
 - Drive `appDataFolder`: groups/channels/videoStates snapshot.
-- Cloud API: AI tags, WebSub registration và event inbox.
+- Cloud API: AI tags, AI groups, AI unsubscribe suggestions (stateless).
 
 `Channel.id` từ DOM bắt đầu bằng `channel:`. Subscription sync chuyển sang canonical `UC...` ID khi exact custom URL/handle match, đồng thời rewrite group/video references.
 
@@ -92,7 +89,7 @@ Thứ tự group dùng `Group.position`. Mọi màn hình điều hướng Feed 
 - `storage`: local/session state.
 - `identity`: Google OAuth.
 - `activeTab`: toggle workspace từ toolbar.
-- `alarms`: cloud event polling và background channel enrichment.
+- `alarms`: background channel enrichment.
 - `notifications`: group notifications.
 - YouTube/Google host permissions: API calls từ background.
 - Production Cloud host permission: giới hạn đúng `youtube-collections-cloud.qeoqeo.workers.dev`; không xin quyền động `https://*/*` từ content script.

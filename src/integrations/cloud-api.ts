@@ -1,4 +1,4 @@
-import type { Channel, CloudVideoEvent } from '@/src/domain/types';
+import type { Channel } from '@/src/domain/types';
 
 const CLOUD_SESSION_KEY = 'youtube-collections-cloud-session-v1';
 
@@ -8,10 +8,6 @@ export interface CloudStatus {
   ok: boolean;
   aiConfigured: boolean;
   aiModel: string;
-  subscriptions: number;
-  activeSubscriptions: number;
-  pendingSubscriptions: number;
-  events: number;
 }
 
 function apiUrl(baseUrl: string, path: string): string {
@@ -72,12 +68,6 @@ export async function suggestUnsubscriptionsWithAi(baseUrl: string, accessToken:
   });
 }
 
-export async function registerWebSub(baseUrl: string, accessToken: string, channelIds: string[]): Promise<{ registered: number }> {
-  return request(baseUrl, '/v1/websub/subscriptions', accessToken, {
-    method: 'POST', body: JSON.stringify({ channelIds })
-  });
-}
-
 export async function checkCloudHealth(baseUrl: string): Promise<{ ok: boolean; service: string; time: string }> {
   const response = await fetch(apiUrl(baseUrl, '/health'));
   if (!response.ok) throw new Error(`Cloud health ${response.status}: ${(await response.text()).slice(0, 200)}`);
@@ -86,10 +76,4 @@ export async function checkCloudHealth(baseUrl: string): Promise<{ ok: boolean; 
 
 export async function getCloudStatus(baseUrl: string, accessToken: string): Promise<CloudStatus> {
   return request(baseUrl, '/v1/status', accessToken);
-}
-
-export async function pollCloudEvents(baseUrl: string, accessToken: string, cursor?: string): Promise<{ events: CloudVideoEvent[]; cursor?: string }> {
-  const params = new URLSearchParams();
-  if (cursor) params.set('cursor', cursor);
-  return request(baseUrl, `/v1/events${params.size ? `?${params}` : ''}`, accessToken);
 }

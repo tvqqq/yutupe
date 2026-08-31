@@ -25,8 +25,6 @@ export type AppMessage =
   | { type: 'AI_ORGANIZE_CHANNELS' }
   | { type: 'FETCH_SUGGESTIONS'; payload: { query?: string } }
   | { type: 'AI_UNSUBSCRIBE_SUGGESTIONS'; payload: { channelIds: string[] } }
-  | { type: 'REGISTER_WEBSUB' }
-  | { type: 'POLL_CLOUD_EVENTS' }
   | { type: 'CHECK_CLOUD_STATUS' }
   | { type: 'GRANT_CLOUD_PERMISSION'; payload: { baseUrl: string } }
   | { type: 'IMPORT_STATE'; payload: unknown }
